@@ -39,7 +39,6 @@ SET_LAUNCH_OPTION=0
 RESET_CONFIG=0
 UNINSTALL=0
 KEEP_CONFIG=0
-UNATTENDED=0
 
 usage() {
     cat <<'EOF'
@@ -56,7 +55,7 @@ Usage: install.sh [options]
   --reset-config          replace an existing FC3PerformancePatch.ini with the default
   --uninstall             remove the patch and restore every backup
   --keep-config           with --uninstall: keep FC3PerformancePatch.ini
-  -y, --yes               never ask questions
+  -y, --yes               accepted for scripts; this installer never asks questions
   -h, --help              show this help
 EOF
 }
@@ -77,7 +76,7 @@ while [ $# -gt 0 ]; do
         --reset-config) RESET_CONFIG=1 ;;
         --uninstall) UNINSTALL=1 ;;
         --keep-config) KEEP_CONFIG=1 ;;
-        -y|--yes) UNATTENDED=1 ;;
+        -y|--yes) ;; # accepted for symmetry with the Windows installer; this script never asks
         -h|--help) usage; exit 0 ;;
         *) usage >&2; die "unknown option: $1" ;;
     esac

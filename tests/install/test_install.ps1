@@ -31,7 +31,11 @@ function Check([bool] $Condition, [string] $Message) {
     }
 }
 
-function Hash([string] $Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
+function Hash([string] $Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { [BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path))) -replace '-', '' }
+    finally { $sha.Dispose() }
+}
 
 # ---- independent PE checks (imagehlp is the reference implementation) -------------------
 Add-Type -Namespace Fc3ppTest -Name Native -MemberDefinition @'

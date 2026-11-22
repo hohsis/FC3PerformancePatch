@@ -8,6 +8,10 @@
 #
 #   tests/install/test_install.sh [path/to/version.dll]
 
+# The tests use the idiom "<condition>; check $? <message>". $? is expanded before
+# anything in the message, so the status cannot be overwritten.
+# shellcheck disable=SC2319
+
 set -u
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)

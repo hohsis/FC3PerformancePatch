@@ -126,7 +126,17 @@ function Write-Done([string] $Text) { Write-Host "  $Text" -ForegroundColor Gree
 
 function Get-Stamp { (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss') }
 
-function Get-Sha256([string] $Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+# Deliberately not Get-FileHash: that is a script function which goes missing when
+# Windows PowerShell is started from a PowerShell 7 session (inherited PSModulePath).
+function Get-Sha256([string] $Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $sha.ComputeHash([IO.File]::ReadAllBytes($Path))
+    } finally {
+        $sha.Dispose()
+    }
+    ([BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
+}
 
 function Test-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
