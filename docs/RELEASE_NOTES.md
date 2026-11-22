@@ -18,6 +18,9 @@ default to on. Copy the new INI too if you want them listed.
   leaves out only the levels that do not fit (`[Textures] SkipMismatchedMip0`), and the original
   close-up textures of textures a mod has repainted, which would otherwise show through a few metres
   ahead of you (`[Textures] SkipReplacedTextureMip0`).
+- **ARM handhelds (Wine with FEX).** Fast and slow cores are told apart there (Wine does not report
+  them), and the patch copes with launchers that move the game to other processors after it has
+  started. The test suite passes under FEX; the game itself has not been tried on such a device yet.
 - **DPI awareness.** The game is marked DPI aware, so on displays scaled above 100 % Windows no longer
   reports a smaller desktop to it or blurs windowed and borderless output (`[Display] HighDpiAware`).
 - Windows no longer swaps the game window for a "Not responding" ghost during long loads

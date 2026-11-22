@@ -35,7 +35,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir hangover && cd hangover
+          # Outside the checkout: the privacy audit scans every file in it.
+          mkdir "$RUNNER_TEMP/hangover" && cd "$RUNNER_TEMP/hangover"
           gh release download --repo AndreRH/hangover --pattern '*ubuntu2404_noble_arm64.tar'
           tar -xf ./*.tar
           ls -1

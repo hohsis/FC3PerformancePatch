@@ -38,7 +38,7 @@ FC3PerformancePatch.ini
 
 In Steam: right-click the game > *Manage* > *Browse local files*, then open `bin`.
 
-**Linux, Steam Deck:** also set this launch option once (right-click the game > *Properties* >
+**Linux, Steam Deck, ARM handhelds:** also set this launch option once (right-click the game > *Properties* >
 *Launch Options*). Wine ignores the file without it.
 
 ```
@@ -102,7 +102,8 @@ Verified:
 - The texture crash: cause established from a crash dump; the fix is tested on the real engine DLLs of
   both games, and Far Cry 3 (DX11) was played with a large HD texture mod and the game's normal settings:
   it loads and runs where it crashed before, and the log shows the unfitting levels being left out.
-- The test suite passes on Windows and under Wine on Linux.
+- The test suite passes on Windows, under Wine on Linux, and on an ARM64 machine under Wine with the FEX
+  x86 emulator (the arrangement ARM handhelds use).
 
 Not verified:
 
@@ -111,6 +112,8 @@ Not verified:
 - `SkipReplacedTextureMip0` in play: it is tested on synthetic archives and finds the expected files in a
   real modded installation, but the result on screen was not yet checked.
 - The game under Proton or on a Steam Deck, on AMD or Intel graphics, or on a real 32-thread Intel processor.
+- The game on an ARM device. Only the test suite ran under FEX, on a machine whose cores are all alike;
+  the handling of fast and slow ARM cores is covered by unit tests alone.
 - Whether keeping `XAudio2_7.dll` loaded cures the crashes players report mid-session.
 
 Reports are welcome; please attach the log.

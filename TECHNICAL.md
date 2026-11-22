@@ -183,6 +183,31 @@ wrong (process-wide pinning, SMT-oblivious worker placement, discarded user affi
 without SMT is the long-standing community recommendation for this engine, but no gameplay benchmark was
 run for this document.
 
+### ARM processors: Wine with the FEX emulator
+
+On ARM64 devices the game runs as x86 code translated by FEX inside an ARM64 build of Wine (Valve's ARM
+Proton and Android launchers work this way). Three things matter to this patch there:
+
+- **Code patches.** Translated code is cached, so a patch must be announced. `mem_patch` brackets every
+  write with `VirtualProtect` and calls `FlushInstructionCache`; Wine forwards both to the emulator, which
+  discards its translation of the range. The patches are also applied before the engine has run.
+- **Fast and slow cores.** Wine fills in `EfficiencyClass` only for Intel hybrid processors (it reads the
+  Intel-specific `/sys/devices/cpu_core` node). On an ARM "big.LITTLE" processor every core is class 0,
+  and the small cores have the lowest numbers (Snapdragon 8 Gen 2: cpu0-2 small, cpu3-6 big, cpu7 prime),
+  so "six cores, performance cores first" would have taken every small core and never the fastest one.
+  Under Wine, when no classes are reported, the patch reads each core's
+  `/sys/devices/system/cpu/cpuN/cpu_capacity` (through `\\?\unix\...`, falling back to drive `Z:`) and
+  ranks the cores by it. If the files cannot be read, nothing changes.
+- **Being moved afterwards.** Android launchers confine the game to a set of processors from outside,
+  after its window appears. An engine request for a processor the process has since lost would fail;
+  the patch then places the thread on what is left of the request, or anywhere in the process's set.
+
+FEX reports itself through the CPUID hypervisor leaf (`FEXIFEXIEMU`); the log notes it. Status: the whole
+test suite, including the code patches executed as machine code and the hooks inside a host process, passes
+on a GitHub ARM64 runner under Wine 11 with FEX as the 32-bit CPU back end (Hangover's build). That machine
+has four identical cores and no GPU: core ranking is covered by unit tests with a big.LITTLE layout, the
+confinement case by the runtime test, and **the game itself has not been run on an ARM device.**
+
 ## 4. Timing
 
 The engine imports only `timeGetTime` from `winmm.dll`; it never calls `timeBeginPeriod`. Since Windows 10
@@ -508,6 +533,7 @@ of anecdote.
 | Real engine code | The game's own function, called in isolation from the user's DLLs (section 2); the texture guard installed on the game's real texture class table and called through it (section 9) |
 | Process integration | A 32-bit host with stand-in modules named like the engine's, in 21 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
+| Other processors | The same test suite on an ARM64 runner, the 32-bit test programs translated by FEX inside ARM64 Wine |
 | Privacy | Sources, git history and binaries are scanned for paths, account names, addresses and IDs |
 
 Not covered: gameplay benchmarks, the game under
