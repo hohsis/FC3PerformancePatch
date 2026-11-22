@@ -179,6 +179,10 @@ Honest status, so you know what to expect:
   executable, including the Large Address Aware change.
 - A trace of the running game confirmed the processor behaviour described above, and that with the patch
   the engine's worker threads end up on separate physical cores.
+- Fullscreen after Alt+Tab: the cause was found by decompiling the DX11 renderer, the fix is tested
+  against a stand-in for DXGI, and the log of a 33-minute Far Cry 3 session (DX11, Windows 11, 4K) shows
+  Windows taking the game out of fullscreen three times, the first time seconds after start-up, with
+  fullscreen restored each time.
 - The DLL, its installers and its tests pass under Wine 11 (Proton Experimental) on Linux and in CI
   (MSVC on Windows; MinGW-w64 cross build on Linux, tests under Wine).
 
@@ -191,10 +195,9 @@ Honest status, so you know what to expect:
 - The game itself was not run under Proton or on a Steam Deck, on AMD or Intel graphics, or on a real
   32-thread Intel processor. Reports are very welcome.
 - `SleepZeroYield`, `-DisableCFG` and DXVK-on-Windows are optional extras without measured benefit here.
-- **Fullscreen after Alt+Tab** (new in 1.1.0): the cause was found by decompiling the DX11 renderer, and
-  the fix is tested against a stand-in for DXGI that reproduces the sequence (focus loss, Windows dropping
-  fullscreen, return, Alt+Enter, failed mode switches). It has not yet been confirmed in the running game.
-  It does nothing for the DX9 executable, whose behaviour was not analysed. If it misbehaves, set
+- **Fullscreen after Alt+Tab** (new in 1.1.0) was only exercised in Far Cry 3 with the DX11 executable
+  (see *Verified*). Blood Dragon uses the same mechanism but was not played with it. It does nothing for
+  the DX9 executables, whose behaviour was not analysed. If it misbehaves, set
   `RestoreFullscreenOnFocus=0`; `Borderless="1"` in `GamerProfile.xml` is an alternative that avoids
   exclusive fullscreen altogether.
 - `KeepXAudio2Loaded` applies the published remedy for the XAudio2 2.7 unload defect, which is described

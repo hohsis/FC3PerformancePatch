@@ -16,6 +16,7 @@
 #include "display.h"
 
 #include <dxgi.h>
+#include <string.h>
 
 #include "fs_guard.h"
 #include "log.h"
@@ -116,16 +117,31 @@ static int chain_window_is_active(IDXGISwapChain *chain)
 static void log_fullscreen_mode(IDXGISwapChain *chain)
 {
     DXGI_SWAP_CHAIN_DESC desc;
+    IDXGIOutput *output = NULL;
 
     if (FAILED(IDXGISwapChain_GetDesc(chain, &desc))) {
         return;
     }
     if (desc.BufferDesc.RefreshRate.Denominator) {
-        LOGI("display: fullscreen at %ux%u, %.2f Hz", desc.BufferDesc.Width, desc.BufferDesc.Height,
+        LOGI("display: fullscreen at %ux%u, %.2f Hz requested", desc.BufferDesc.Width, desc.BufferDesc.Height,
              (double)desc.BufferDesc.RefreshRate.Numerator / (double)desc.BufferDesc.RefreshRate.Denominator);
     } else {
         LOGI("display: fullscreen at %ux%u, refresh rate left to the system", desc.BufferDesc.Width,
              desc.BufferDesc.Height);
+    }
+    /* What the monitor is actually doing now (the device name is not logged). */
+    if (SUCCEEDED(IDXGISwapChain_GetContainingOutput(chain, &output)) && output) {
+        DXGI_OUTPUT_DESC output_desc;
+        DEVMODEW mode;
+
+        memset(&mode, 0, sizeof(mode));
+        mode.dmSize = sizeof(mode);
+        if (SUCCEEDED(IDXGIOutput_GetDesc(output, &output_desc)) &&
+            EnumDisplaySettingsW(output_desc.DeviceName, ENUM_CURRENT_SETTINGS, &mode)) {
+            LOGI("display: the monitor is running at %lux%lu, %lu Hz", (unsigned long)mode.dmPelsWidth,
+                 (unsigned long)mode.dmPelsHeight, (unsigned long)mode.dmDisplayFrequency);
+        }
+        IDXGIOutput_Release(output);
     }
 }
 

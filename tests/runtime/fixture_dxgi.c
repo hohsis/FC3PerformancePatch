@@ -107,6 +107,16 @@ static HRESULT WINAPI fx_get_desc(fx_object *self, fx_swap_chain_desc *desc)
     return S_OK;
 }
 
+/* No monitor behind the fake swap chain. */
+static HRESULT WINAPI fx_get_containing_output(fx_object *self, void **output)
+{
+    (void)self;
+    if (output) {
+        *output = NULL;
+    }
+    return ((HRESULT)0x887A0004L); /* DXGI_ERROR_UNSUPPORTED */
+}
+
 /* Slots the tests never call are NULL: a stray call fails loudly. */
 static void *const g_chain_vtbl[18] = {
     (void *)fx_query_interface,      /* 0 */
@@ -119,7 +129,9 @@ static void *const g_chain_vtbl[18] = {
     (void *)fx_set_fullscreen_state, /* 10 */
     (void *)fx_get_fullscreen_state, /* 11 */
     (void *)fx_get_desc,             /* 12 */
-    NULL, NULL, NULL, NULL, NULL,    /* 13-17 */
+    NULL, NULL,                      /* 13-14 ResizeBuffers, ResizeTarget */
+    (void *)fx_get_containing_output, /* 15 */
+    NULL, NULL,                      /* 16-17 */
 };
 
 static fx_object g_chains[4] = {

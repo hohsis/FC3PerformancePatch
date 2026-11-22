@@ -259,7 +259,8 @@ FX_API void *fx_dxgi_chain(void)
 
 /* ---- XAudio2 2.7, created and used the way the sound engine does ------------------
  * Returns a bit mask of how far it got: 1 engine created, 2 initialised,
- * 4 mastering voice, 8 source voice, 16 output matrix set. 0 means XAudio2 2.7
+ * 4 mastering voice, 8 source voice, 16 output matrix set, 32 source voice
+ * re-tuned to another sample rate. 0 means XAudio2 2.7
  * is not installed (it comes with the DirectX June 2010 runtime). Nothing is
  * played. */
 #pragma pack(push, 1)
@@ -284,6 +285,7 @@ FX_API int fx_audio_probe(void)
     typedef void(__stdcall * details_fn)(void *, fx_voice_details *);
     typedef HRESULT(__stdcall * matrix_fn)(void *, void *, UINT32, UINT32, const float *, UINT32);
     typedef void(__stdcall * destroy_fn)(void *);
+    typedef HRESULT(__stdcall * rate_fn)(void *, UINT32);
     static const GUID clsid = {0x5a508685, 0xa254, 0x4fba, {0x9b, 0x82, 0x9a, 0x24, 0xb0, 0x03, 0x06, 0xaf}};
     static const GUID iid = {0x8bcf1f58, 0x9fe7, 0x4583, {0x8a, 0xc6, 0xe2, 0xad, 0xc4, 0x65, 0xc8, 0xbb}};
     static const fx_wave_format format = {1, 1, 22050, 44100, 2, 16, 0};
@@ -312,6 +314,9 @@ FX_API int fx_audio_probe(void)
                         SUCCEEDED(((matrix_fn)(*(void ***)source)[16])(source, NULL, 1, details.channels, matrix,
                                                                        0))) {
                         result |= 16;
+                    }
+                    if (SUCCEEDED(((rate_fn)(*(void ***)source)[28])(source, 16000))) {
+                        result |= 32;
                     }
                     ((destroy_fn)(*(void ***)source)[18])(source);
                 }

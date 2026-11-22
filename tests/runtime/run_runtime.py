@@ -249,7 +249,12 @@ def run_audio(args, env):
         expect += ["audio: first source voice with PCM, 1 channel, 22050 Hz, 16 bit",
                    "audio: 1 source voices created in 1 format"]
     if stage & 16:
-        expect += ["audio: output matrix 1 -> "]
+        expect += ["audio: new output matrix, source voice, 1 -> ", "mono sources, highest level sent"]
+    if stage & 32:
+        expect += ["audio: a source voice was re-tuned to 16000 Hz for the first time",
+                   "re-tuned to  16000 Hz       1 times"]
+    if stage & 8 and not stage & 32:
+        raise Failure("stage %d: SetSourceSampleRate failed on a fresh source voice (wrong slot?)" % stage)
     for s in expect:
         if s not in log:
             raise Failure("stage %d: log does not contain %r\n--- log ---\n%s" % (stage, s, log))

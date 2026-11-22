@@ -292,8 +292,11 @@ window (the secure desktop of a UAC prompt, for example) is indistinguishable fr
 on unchanged. The DX9 renderer (`FC3.dll`) uses the Direct3D 9 device-lost protocol instead and was not
 analysed.
 
-Status: derived from the decompiled code above and tested against a stand-in `dxgi.dll` that reproduces
-the sequence; **not yet confirmed in the running game**.
+Status: derived from the decompiled code above, tested against a stand-in `dxgi.dll` that reproduces the
+sequence, and observed in the running game (Far Cry 3, DX11, Windows 11): in a 33-minute session the log
+shows three focus-loss drops, each followed by fullscreen being reported again. The first drop came 0.4 s
+after the game entered fullscreen during start-up, before any Alt+Tab; without the guard that alone would
+leave the game windowed. Blood Dragon was not played with it.
 
 ### DPI awareness and window ghosting
 
@@ -334,10 +337,20 @@ A 16 kHz recording contains nothing above 8 kHz and a 32 kHz one nothing above 1
 particular sounds band-limited however it is played back. No patch can restore what was never shipped;
 nothing in this project alters the sound.
 
-Not established: the interpolation quality of XAudio2 2.7's sample-rate converter, the exact 5.1 to stereo
-matrix it applies at the mastering voice, and whether DARE adapts its panning to the output device.
-`[Debug] TraceAudio=1` logs the device format, the mixer set-up, the format of every kind of source voice
-and the first output matrices, to answer those questions on a given system. It never logs the device name.
+A trace of the running game on a stereo, 48 kHz output device confirms this: the mastering voice is
+created with six channels, the final submix feeds it through an identity matrix, and about 30 six-channel
+and mono submix voices sit in between, all at 48 kHz. DARE does not adapt to the stereo device; the fold-down
+from 5.1 is left entirely to XAudio2. Source voices come from a small pool (83 were created in 33 minutes)
+that is re-tuned per sound, so creation formats say little about what is played.
+
+Not established: the interpolation quality of XAudio2 2.7's sample-rate converter and the 5.1 to stereo
+coefficients it applies at the mastering voice. Microsoft's documentation describes the default mapping
+only in prose (each channel goes to the nearest speakers) and gives no figures, in particular none for the
+LFE channel.
+
+`[Debug] TraceAudio=1` logs the device format, the mixer set-up, every sample rate a source voice is tuned
+to, each distinct output matrix and, per source layout, the highest level ever sent to each of the six
+output channels. It never logs the device name.
 
 ### Keeping XAudio2 loaded (`[Audio] KeepXAudio2Loaded`)
 
@@ -373,6 +386,6 @@ named executable.
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
 | Privacy | Sources, git history and binaries are scanned for paths, account names, addresses and IDs |
 
-Not covered: gameplay benchmarks, the fullscreen guard in the running game (section 7), the game under
+Not covered: gameplay benchmarks, the game under
 Proton or on a Steam Deck, AMD and Intel GPUs, a physical 32-thread Intel processor, and the Ubisoft
 Connect or Epic builds of the game.

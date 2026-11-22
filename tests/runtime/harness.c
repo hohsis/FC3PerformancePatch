@@ -668,7 +668,7 @@ int main(int argc, char **argv)
          * The test driver matches the log against the reported stage. */
         int stage = fx_audio_probe();
         printf("audio stage: %d\n", stage);
-        CHECK(stage >= 0 && stage <= 31, "XAudio2 probe returned %d", stage);
+        CHECK(stage >= 0 && stage <= 63, "XAudio2 probe returned %d", stage);
         if ((stage & 1) && strcmp(scenario, "audio") == 0) {
             CHECK(GetModuleHandleA("XAudio2_7.dll") != NULL,
                   "XAudio2_7.dll was unloaded although the patch is meant to keep it loaded");

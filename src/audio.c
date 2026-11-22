@@ -43,10 +43,13 @@
 /* IXAudio2Voice */
 #define SLOT_VOICE_GET_DETAILS 0
 #define SLOT_VOICE_SET_OUTPUT_MATRIX 16
+/* IXAudio2SourceVoice */
+#define SLOT_SOURCE_SET_SAMPLE_RATE 28
 
 #define MAX_FORMATS 48
 #define MAX_MASTERS 4
-#define MAX_MATRIX_LOGS 40
+#define MAX_MATRIX_LOGS 96
+#define MAX_RATES 16
 #define MAX_SUBMIX_LOGS 48
 
 #pragma pack(push, 1)
@@ -87,6 +90,7 @@ typedef HRESULT(__stdcall *create_submix_fn)(void *self, void **voice, UINT32 ch
 typedef HRESULT(__stdcall *create_master_fn)(void *self, void **voice, UINT32 channels, UINT32 rate, UINT32 flags,
                                              UINT32 device, const void *effects);
 typedef void(__stdcall *get_voice_details_fn)(void *self, xa_voice_details *details);
+typedef HRESULT(__stdcall *set_sample_rate_fn)(void *self, UINT32 rate);
 typedef HRESULT(__stdcall *set_output_matrix_fn)(void *self, void *destination, UINT32 source_channels,
                                                  UINT32 destination_channels, const float *matrix, UINT32 set);
 
@@ -96,6 +100,11 @@ typedef struct format_stat {
     unsigned long count;
     float max_ratio;
 } format_stat;
+
+typedef struct rate_stat {
+    UINT32 rate;
+    unsigned long count;
+} rate_stat;
 
 /* {5a508685-a254-4fba-9b82-9a24b00306af} XAudio2 2.7, {db05ea35-...} its debug build */
 static const GUID CLSID_XAUDIO2_27 = {0x5a508685, 0xa254, 0x4fba, {0x9b, 0x82, 0x9a, 0x24, 0xb0, 0x03, 0x06, 0xaf}};
@@ -108,12 +117,20 @@ static vt_hook g_source_hooks[VT_MAX_TABLES];
 static vt_hook g_submix_hooks[VT_MAX_TABLES];
 static vt_hook g_master_hooks[VT_MAX_TABLES];
 static vt_hook g_matrix_hooks[VT_MAX_TABLES];
+static vt_hook g_rate_hooks[VT_MAX_TABLES];
 static format_stat g_formats[MAX_FORMATS];
 static unsigned g_format_count;
 static unsigned long g_source_total, g_source_other;
 static void *g_masters[MAX_MASTERS];
 static unsigned g_master_count;
-static unsigned g_matrix_logs, g_submix_logs;
+static unsigned g_submix_logs;
+static unsigned long g_matrix_keys[MAX_MATRIX_LOGS];
+static unsigned g_matrix_key_count;
+static const void *g_source_voice_vtbl;
+static float g_send_peak[2][8];          /* [mono, stereo sources][output channel] */
+static unsigned long g_send_matrices[2];
+static rate_stat g_rates[MAX_RATES];
+static unsigned g_rate_count;
 static unsigned g_engines;
 static int g_pin, g_trace, g_pinned;
 
@@ -148,28 +165,82 @@ static int is_master(const void *voice)
 
 /* ---- voices --------------------------------------------------------------------- */
 
+/* FNV-1a over the matrix, coefficients rounded to 0.05, so that only matrices
+ * that differ audibly count as distinct. */
+static unsigned long matrix_key(int from_source, int to_master, UINT32 source_channels, UINT32 destination_channels,
+                                const float *matrix)
+{
+    unsigned long h = 2166136261ul;
+    UINT32 i, n = source_channels * destination_channels;
+
+    h = (h ^ (unsigned long)from_source) * 16777619ul;
+    h = (h ^ (unsigned long)to_master) * 16777619ul;
+    h = (h ^ source_channels) * 16777619ul;
+    h = (h ^ destination_channels) * 16777619ul;
+    for (i = 0; i < n; ++i) {
+        h = (h ^ (unsigned long)(long)(matrix[i] * 20.0f + (matrix[i] < 0 ? -0.5f : 0.5f))) * 16777619ul;
+    }
+    return h ? h : 1;
+}
+
 static HRESULT __stdcall hook_set_output_matrix(void *self, void *destination, UINT32 source_channels,
                                                 UINT32 destination_channels, const float *matrix, UINT32 set)
 {
     set_output_matrix_fn original;
-    int log_it = 0, to_master;
+    int log_it = 0, to_master, from_source, sane, silent = 1;
+    UINT32 d, s;
+
+    sane = matrix && source_channels >= 1 && source_channels <= 8 && destination_channels >= 1 &&
+           destination_channels <= 8;
+    if (sane) {
+        for (d = 0; d < source_channels * destination_channels; ++d) {
+            if (matrix[d] > 0.001f || matrix[d] < -0.001f) {
+                silent = 0;
+                break;
+            }
+        }
+    }
 
     AcquireSRWLockExclusive(&g_lock);
     original = (set_output_matrix_fn)vt_original(g_matrix_hooks, VT_OF(self));
     to_master = destination == NULL || is_master(destination);
-    /* Interesting are the matrices that change the channel count and the ones
-     * that feed the mastering voice. */
-    if (g_matrix_logs < MAX_MATRIX_LOGS && matrix && (to_master || source_channels != destination_channels) &&
-        source_channels >= 1 && source_channels <= 8 && destination_channels >= 1 && destination_channels <= 8) {
-        ++g_matrix_logs;
-        log_it = 1;
+    from_source = VT_OF(self) == g_source_voice_vtbl;
+    if (sane && !silent) {
+        unsigned long key = matrix_key(from_source, to_master, source_channels, destination_channels, matrix);
+        unsigned i;
+
+        /* How loud each output channel is ever driven by sounds, per source
+         * layout: shows whether centre, LFE and surrounds are used at all. */
+        if (from_source && source_channels <= 2) {
+            float *peak = g_send_peak[source_channels - 1];
+            ++g_send_matrices[source_channels - 1];
+            for (d = 0; d < destination_channels; ++d) {
+                for (s = 0; s < source_channels; ++s) {
+                    float v = matrix[source_channels * d + s];
+                    if (v < 0) {
+                        v = -v;
+                    }
+                    if (v > peak[d]) {
+                        peak[d] = v;
+                    }
+                }
+            }
+        }
+        for (i = 0; i < g_matrix_key_count; ++i) {
+            if (g_matrix_keys[i] == key) {
+                break;
+            }
+        }
+        if (i == g_matrix_key_count && g_matrix_key_count < MAX_MATRIX_LOGS) {
+            g_matrix_keys[g_matrix_key_count++] = key;
+            log_it = 1;
+        }
     }
     ReleaseSRWLockExclusive(&g_lock);
 
     if (log_it) {
         char text[8 * 8 * 6 + 8 * 4 + 8];
         size_t pos = 0;
-        UINT32 d, s;
         /* Row = one destination channel; columns = source channels. */
         for (d = 0; d < destination_channels; ++d) {
             for (s = 0; s < source_channels && pos + 8 < sizeof(text); ++s) {
@@ -185,16 +256,50 @@ static HRESULT __stdcall hook_set_output_matrix(void *self, void *destination, U
             }
         }
         text[pos] = '\0';
-        LOGI("audio: output matrix %u -> %u channels%s: %s", (unsigned)source_channels,
-             (unsigned)destination_channels, to_master ? " (to the mastering voice)" : "", text);
+        LOGI("audio: new output matrix, %s voice, %u -> %u channels%s: %s", from_source ? "source" : "submix",
+             (unsigned)source_channels, (unsigned)destination_channels,
+             to_master ? " (to the mastering voice)" : "", text);
     }
     return original ? original(self, destination, source_channels, destination_channels, matrix, set) : E_FAIL;
 }
 
-static void watch_voice_class(void *voice)
+/* The engine reuses a small pool of source voices and re-tunes them, so the
+ * rates set here, not the creation formats, show what is really played. */
+static HRESULT __stdcall hook_set_source_sample_rate(void *self, UINT32 rate)
+{
+    set_sample_rate_fn original;
+    int is_new = 0;
+    unsigned i;
+
+    AcquireSRWLockExclusive(&g_lock);
+    original = (set_sample_rate_fn)vt_original(g_rate_hooks, VT_OF(self));
+    for (i = 0; i < g_rate_count; ++i) {
+        if (g_rates[i].rate == rate) {
+            break;
+        }
+    }
+    if (i == g_rate_count && g_rate_count < MAX_RATES) {
+        g_rates[g_rate_count++].rate = rate;
+        is_new = 1;
+    }
+    if (i < g_rate_count) {
+        ++g_rates[i].count;
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    if (is_new) {
+        LOGI("audio: a source voice was re-tuned to %lu Hz for the first time", (unsigned long)rate);
+    }
+    return original ? original(self, rate) : E_FAIL;
+}
+
+static void watch_voice_class(void *voice, int is_source)
 {
     AcquireSRWLockExclusive(&g_lock);
     vt_hook_slot(g_matrix_hooks, VT_OF(voice), SLOT_VOICE_SET_OUTPUT_MATRIX, (void *)hook_set_output_matrix);
+    if (is_source) {
+        g_source_voice_vtbl = VT_OF(voice);
+        vt_hook_slot(g_rate_hooks, VT_OF(voice), SLOT_SOURCE_SET_SAMPLE_RATE, (void *)hook_set_source_sample_rate);
+    }
     ReleaseSRWLockExclusive(&g_lock);
 }
 
@@ -259,7 +364,7 @@ static HRESULT __stdcall hook_create_source(void *self, void **voice, const xa_f
              (unsigned long)first.rate, (unsigned)first.bits, (unsigned long)flags, (double)max_ratio);
     }
     if (voice && *voice) {
-        watch_voice_class(*voice);
+        watch_voice_class(*voice, 1);
     }
     return hr;
 }
@@ -288,7 +393,7 @@ static HRESULT __stdcall hook_create_submix(void *self, void **voice, UINT32 cha
              (unsigned long)(sends ? sends->count : 0), sends && sends->count == 1 ? "" : "s", (unsigned long)hr);
     }
     if (SUCCEEDED(hr) && voice && *voice) {
-        watch_voice_class(*voice);
+        watch_voice_class(*voice, 0);
     }
     return hr;
 }
@@ -460,5 +565,17 @@ void audio_log_stats(void)
     }
     if (g_source_other) {
         LOGI("audio:   %7lu x further formats (table full)", g_source_other);
+    }
+    for (i = 0; i < g_rate_count; ++i) {
+        LOGI("audio:   re-tuned to %6lu Hz %7lu times", (unsigned long)g_rates[i].rate, g_rates[i].count);
+    }
+    for (i = 0; i < 2; ++i) {
+        const float *p = g_send_peak[i];
+        if (g_send_matrices[i]) {
+            LOGI("audio:   %s sources, highest level sent to each output channel (%lu matrices): "
+                 "FL %.2f, FR %.2f, C %.2f, LFE %.2f, SL %.2f, SR %.2f",
+                 i ? "stereo" : "mono", g_send_matrices[i], (double)p[0], (double)p[1], (double)p[2],
+                 (double)p[3], (double)p[4], (double)p[5]);
+        }
     }
 }
