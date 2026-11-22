@@ -2,8 +2,8 @@
 `bin` folder. On Linux also set the Steam launch option `WINEDLLOVERRIDES="version=n,b" %command%`.
 See the [README](https://github.com/hohsis/FC3PerformancePatch#readme) for details.
 
-Updating from 1.0.0: replace `version.dll`. Your existing INI file keeps working; the new settings
-default to on. Copy the new INI too if you want them listed.
+Updating from 1.0.0: replace `version.dll`. Your existing INI file keeps working; the new fixes
+default to on, the two extras to off. Copy the new INI too if you want them listed.
 
 **New in 1.1.0**
 
@@ -21,6 +21,13 @@ default to on. Copy the new INI too if you want them listed.
 - **A settings menu in the game (DX11).** F8, or both thumbsticks held in on a gamepad, opens a menu
   drawn by the patch: what it is doing, and its settings, which are saved to the INI file. The game
   does not see the keys used in it. `[Menu] Key` changes the key, `[Menu] Enabled=0` removes it.
+- **Two extras, off by default** because they have not been confirmed in play yet; switch them on in
+  the in-game menu or the INI file:
+  - *Gamepad or keyboard by use* (`[Controls] AutoSwitchInput=1`): the game changes between gamepad
+    mode and keyboard/mouse mode according to what you touch, instead of staying in the mode set in
+    its options. All four executables.
+  - *Draw distance* (`[Graphics] DrawDistance=1` or `2`): detailed models, trees, terrain and sun
+    shadows up to further away, at a cost in frame rate. `GamerProfile.xml` is not changed.
 - **ARM handhelds (Wine with FEX).** Fast and slow cores are told apart there (Wine does not report
   them), and the patch copes with launchers that move the game to other processors after it has
   started. The test suite passes under FEX; the game itself has not been tried on such a device yet.

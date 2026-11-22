@@ -24,7 +24,7 @@ import sys
 HARNESS = "fc3pp_harness.exe"
 HARNESS_DX9 = "fc3pp_harness_dx9.exe"
 PASSIVE = "fc3pp_passive.exe"
-FIXTURES = ["FC3_d3d11.dll", "FC3.dll", "systemdetection.dll", "dxgi.dll"]
+FIXTURES = ["FC3_d3d11.dll", "FC3.dll", "systemdetection.dll", "dxgi.dll", "xinput1_3.dll", "dinput8.dll"]
 LOG = "FC3PerformancePatch.log"
 INI = "FC3PerformancePatch.ini"
 
@@ -34,7 +34,7 @@ def ini(**kw):
         "enabled": 1, "log": 3, "fix": 1, "mode": "engine", "max_cores": 3, "smt": 0,
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
         "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0, "texguard": 1,
-        "texscan": 1, "menu": 1, "menu_open": 0,
+        "texscan": 1, "menu": 1, "menu_open": 0, "autoswitch": 0, "focus": 0, "distance": 0,
     }
     values.update(kw)
     return (
@@ -45,9 +45,11 @@ def ini(**kw):
         "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
         "[Textures]\nSkipMismatchedMip0={texguard}\nSkipReplacedTextureMip0={texscan}\n"
         "[Menu]\nEnabled={menu}\nKey=F9\n"
+        "[Controls]\nAutoSwitchInput={autoswitch}\n"
+        "[Graphics]\nDrawDistance={distance}\n"
         "[Audio]\nKeepXAudio2Loaded={keep_xaudio}\n"
         "[Debug]\nTraceCpuApi={trace}\nTraceAudio={trace_audio}\nSimulateAffinityMask={simulate}\n"
-        "MenuOpenAtStart={menu_open}\n"
+        "MenuOpenAtStart={menu_open}\nInputWithoutFocus={focus}\n"
     ).format(**values)
 
 
@@ -87,6 +89,42 @@ SCENARIOS = {
                   ["menu: cannot draw, the game is not drawing with Direct3D 11"], []),
     "menu-off": (HARNESS, ini(menu=0, restore_fs=0), ["menu-off"], True,
                  ["initialised"], ["menu:", "display: fullscreen guard", "ERROR"]),
+    # Gamepad, keyboard and mouse are test fixtures; the focus aid stands in for
+    # the game window being in the foreground, which a test host never is.
+    "input": (HARNESS, ini(autoswitch=1, focus=1), ["input"], True,
+              ["FC3_d3d11.dll: input-mode switch found ('release' build variant); switching between gamepad "
+               "and keyboard/mouse by use is on",
+               "controls: asked the game for gamepad mode (first switch of this session)",
+               "controls: the input mode was switched 9 times"],
+              ["ERROR", "cannot be held back"]),
+    "input-off": (HARNESS, ini(), ["input-off"], True,
+                  ["switching between gamepad and keyboard/mouse by use is off",
+                   "input: the game's gamepad and keyboard/mouse reads go through the patch (2 of 2 hooks)"],
+                  ["ERROR", "controls:", "cannot be held back"]),
+    # No menu and no switching: the game's input is not hooked at all.
+    "input-none": (HARNESS, ini(menu=0, restore_fs=0), ["input-off"], True,
+                   ["initialised"], ["ERROR", "controls:", "menu:", "input: the game"]),
+    "input-dx9": (HARNESS_DX9, ini(autoswitch=1, focus=1), ["input"], True,
+                  ["FC3.dll: input-mode switch found", "menu: not available with this renderer",
+                   "controls: the input mode was switched 9 times"],
+                  ["ERROR", "opens the settings menu"]),
+    "input-held": (HARNESS, ini(menu_open=1, autoswitch=1, focus=1), ["input-held"], True,
+                   ["menu: cannot draw, the game is not drawing with Direct3D 11",
+                    "controls: asked the game for gamepad mode"], []),
+    "drawdistance": (HARNESS, ini(distance=1), ["drawdistance"], True,
+                     ["graphics: draw distance 'Far' selected; it is applied when the game reads its profile",
+                      "graphics: draw distance 'Far': 3 sections with longer distances added to the profile "
+                      "as the game reads it (the file on disk is not changed)",
+                      "graphics: the profile as it is on disk was copied next to itself "
+                      "(GamerProfile.xml.fc3pp.bak); the copy is made once and never overwritten",
+                      "graphics: the profile was handed to the game with the draw-distance preset 3 times"],
+                     ["ERROR", "was not applied", "adds nothing", "cannot be applied"]),
+    "drawdistance-off": (HARNESS, ini(), ["drawdistance-off"], True, ["initialised"], ["graphics:", "ERROR"]),
+    # A preset is selected but the game's archives cannot be read: the game gets its own file.
+    "drawdistance-nodata": (HARNESS, ini(distance=2), ["drawdistance-off"], True,
+                            ["graphics: draw distance 'Very far' selected",
+                             "graphics: the draw-distance preset cannot be applied: the game's default render "
+                             "configuration could not be read from its archives"], ["adds nothing"]),
     "textures": (HARNESS, ini(), ["textures"], True,
                  ["FC3_d3d11.dll: texture guard active ('release' build variant)",
                   "textures: left out a top mip level that does not fit its texture: the texture is 2048x2048 BC1, "
@@ -274,9 +312,63 @@ def setup_texture_archives(d):
         f.write(rock_top)
 
 
+RENDER_CONFIG = (
+    '<Profile MSAALevel="0" Quality="custom">' + "\r\n" +
+    "\t" + '<Geometry>' + "\r\n" +
+    "\t" + "\t" + '<quality id="low" LodScale="1.5" KillLodScale="2" ClustersLodScale="1.25" RealTreesLodScale="1" />' + "\r\n" +
+    "\t" + "\t" + '<quality id="ultrahigh" LodScale="0.5" KillLodScale="0.5" ClustersLodScale="0.5" '
+    'RealTreesLodScale="0.7" RealTreesVistaMinViewDistanceScale="0.4" />' + "\r\n" +
+    "\t" + '</Geometry>' + "\r\n" +
+    "\t" + '<Shadow>' + "\r\n" +
+    "\t" + "\t" + '<quality id="ultrahigh" SunShadowFadeRange="10" SunShadowRange0="3" SunShadowRange1="12" '
+    'SunShadowRange2="60" />' + "\r\n" +
+    "\t" + '</Shadow>' + "\r\n" +
+    "\t" + '<Terrain>' + "\r\n" +
+    "\t" + "\t" + '<quality id="high" TerrainLodScale="1.0" TerrainDetailViewDistance="512" '
+    'TerrainDetailBlendViewDistance="64" />' + "\r\n" +
+    "\t" + '</Terrain>' + "\r\n" +
+    '</Profile>' + "\r\n")
+
+GAMER_PROFILE = (
+    '<GamerProfile>' + "\r\n" +
+    "\t" + '<SoundProfile MusicEnabled="1" MasterVolume="100" />' + "\r\n" +
+    "\t" + '<RenderProfile MSAALevel="0" ResolutionX="1920" ResolutionY="1080" DisableMip0Loading="0">' + "\r\n" +
+    "\t" + "\t" + '<CustomQuality>' + "\r\n" +
+    "\t" + "\t" + "\t" + '<quality ResolutionX="1920" GeometryQuality="ultrahigh" ShadowQuality="ultrahigh" />' + "\r\n" +
+    "\t" + "\t" + '</CustomQuality>' + "\r\n" +
+    "\t" + '</RenderProfile>' + "\r\n" +
+    "\t" + '<NetworkProfile />' + "\r\n" +
+    '</GamerProfile>' + "\r\n")
+
+
+def setup_profile(d, with_archives=True):
+    """A player's profile next to the host and, in <d>/../data_win32, the
+    game's default render configuration in its "common" archive."""
+    sep = chr(92)
+    data = os.path.join(os.path.dirname(d), "data_win32")
+    shutil.rmtree(data, ignore_errors=True)
+    os.makedirs(data)
+    if with_archives:
+        # A patch archive that does not bring a render configuration of its own.
+        write_archive(data, "patch", {"scripts" + sep + "note.lua": b"-- not a render configuration"})
+        write_archive(data, "common", {
+            "engine" + sep + "settings" + sep + "defaultrenderconfig.xml": RENDER_CONFIG.encode("ascii"),
+            "engine" + sep + "settings" + sep + "other.xml": b"<Other />",
+        })
+    for name in ("GamerProfile.xml", "MyGamerProfile.xml"):
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(GAMER_PROFILE.encode("ascii"))
+
+
+def setup_profile_only(d):
+    setup_profile(d, with_archives=False)
+
+
 # Scenarios whose host sits in <work>/<name>/bin, next to a data folder, as
 # the game sits in <game>/bin next to <game>/data_win32.
-WITH_DATA = {"textures": setup_texture_archives, "textures-noscan": setup_texture_archives}
+WITH_DATA = {"textures": setup_texture_archives, "textures-noscan": setup_texture_archives,
+             "drawdistance": setup_profile, "drawdistance-off": setup_profile,
+             "drawdistance-nodata": setup_profile_only}
 
 
 def run_scenario(args, name, env):
@@ -303,7 +395,7 @@ def run_scenario(args, name, env):
                 raise Failure("log unexpectedly contains %r\n--- log ---\n%s" % (s, log))
         check_log_privacy(log, args.work_dir)
     leftovers = [f for f in os.listdir(d) if f.endswith(".bak") or f.endswith(".fc3pp-new")]
-    if leftovers and name != "noini":
+    if leftovers and name not in ("noini", "drawdistance"):
         raise Failure("unexpected files created: %s" % leftovers)
     return out
 
@@ -421,9 +513,9 @@ def main():
     env = dict(os.environ)
     if args.emulator:
         # Wine prefers its built-in version.dll unless told otherwise - exactly
-        # the launch option the README tells Proton users to set. The dxgi
-        # entry is for the test's fake dxgi.dll only.
-        env["WINEDLLOVERRIDES"] = "version=n,b;dxgi=n,b"
+        # the launch option the README tells Proton users to set. The other
+        # entries are for the test's fake DLLs only.
+        env["WINEDLLOVERRIDES"] = "version=n,b;dxgi=n,b;xinput1_3=n,b;dinput8=n,b"
         env.setdefault("WINEDEBUG", "-all")
 
     names = args.only or (list(SCENARIOS) + ["laa", "audio"])

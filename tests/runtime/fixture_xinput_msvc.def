@@ -1,0 +1,4 @@
+; Export table of the fake xinput1_3.dll (MSVC linker): XInputGetState by ordinal only.
+LIBRARY xinput1_3
+EXPORTS
+    XInputGetState @2 NONAME

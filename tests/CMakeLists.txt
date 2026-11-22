@@ -8,7 +8,7 @@ add_executable(fc3pp_unit
     unit/main.c unit/dummy_pe.c
     unit/test_ini.c unit/test_sigscan.c unit/test_pe_file.c unit/test_cpu.c
     unit/test_patches.c unit/test_pe_image.c unit/test_fs_guard.c unit/test_tex_rule.c
-    unit/test_dunia.c unit/test_menu.c)
+    unit/test_dunia.c unit/test_menu.c unit/test_padmode.c unit/test_gfx_preset.c)
 target_link_libraries(fc3pp_unit PRIVATE fc3pp_win)
 add_test(NAME unit COMMAND fc3pp_unit)
 
@@ -76,6 +76,36 @@ if(NOT MSVC)
 endif()
 fc3pp_runtime_target(fx_dxgi)
 add_dependencies(fx_engine_d3d11 fx_dxgi)
+
+# Fake xinput1_3.dll and dinput8.dll: a gamepad, a keyboard and a mouse whose state
+# the harness sets. The engine fixtures import the first by ordinal through its
+# own import library (the SDKs have none for that version) and the second
+# through the system's import library, like dxgi.dll above.
+if(MSVC)
+    add_library(fx_xinput SHARED runtime/fixture_xinput.c runtime/fixture_xinput_msvc.def)
+else()
+    add_library(fx_xinput SHARED runtime/fixture_xinput.c runtime/fixture_xinput_mingw.def)
+endif()
+set_target_properties(fx_xinput PROPERTIES
+    OUTPUT_NAME xinput1_3
+    IMPORT_PREFIX "fc3pp_"
+    ARCHIVE_OUTPUT_NAME fx_xinput_import)
+fc3pp_runtime_target(fx_xinput)
+
+add_library(fx_dinput SHARED runtime/fixture_dinput.c)
+set_target_properties(fx_dinput PROPERTIES
+    OUTPUT_NAME dinput8
+    IMPORT_PREFIX "fc3pp_"
+    ARCHIVE_OUTPUT_NAME fx_dinput_import)
+if(NOT MSVC)
+    target_link_options(fx_dinput PRIVATE -Wl,--kill-at)
+endif()
+fc3pp_runtime_target(fx_dinput)
+
+foreach(engine fx_engine_d3d11 fx_engine_dx9)
+    target_link_libraries(${engine} PRIVATE fx_xinput dinput8)
+    add_dependencies(${engine} fx_dinput)
+endforeach()
 
 add_library(fx_sysdet SHARED runtime/fixture_sysdet.c)
 set_target_properties(fx_sysdet PROPERTIES OUTPUT_NAME systemdetection)

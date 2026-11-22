@@ -1,0 +1,4 @@
+; Export table of the fake xinput1_3.dll (GNU ld / MinGW-w64): XInputGetState by ordinal only.
+LIBRARY xinput1_3.dll
+EXPORTS
+    XInputGetState@8 @2 NONAME

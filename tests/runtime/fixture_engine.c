@@ -545,6 +545,163 @@ FX_API void fx_tex_state(void *texture, unsigned out[6])
 #endif
 }
 
+/* ---- input -----------------------------------------------------------------------------
+ * The engine reads the gamepad through xinput1_3.dll (imported by ordinal)
+ * and keyboard and mouse through DirectInput devices; next to the host both
+ * DLLs are test fixtures. Its UI manager holds the input mode in three bytes
+ * at +30h; the code that copies the profile's setting there is reproduced
+ * below byte for byte, because the patch finds the manager through it. */
+__declspec(dllimport) DWORD WINAPI XInputGetState(DWORD index, void *state);
+__declspec(dllimport) HRESULT WINAPI DirectInput8Create(HINSTANCE instance, DWORD version, const GUID *iid,
+                                                        void **out, void *outer);
+
+static const GUID FX_GUID_Keyboard = {0x6F1D2B61, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID FX_GUID_Mouse = {0x6F1D2B60, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+static const GUID FX_GUID_Other = {0x6F1D2B70, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+
+typedef HRESULT(__stdcall *fx_create_device_fn)(void *self, const GUID *guid, void **device, void *outer);
+typedef HRESULT(__stdcall *fx_get_state_fn)(void *self, DWORD size, void *data);
+typedef HRESULT(__stdcall *fx_get_data_fn)(void *self, DWORD object_size, void *data, DWORD *count, DWORD flags);
+
+static void *g_fx_input_devices[3]; /* keyboard, mouse, something else */
+
+FX_API unsigned long fx_pad_read(unsigned index, void *state)
+{
+    return XInputGetState(index, state);
+}
+
+FX_API int fx_input_open(void)
+{
+    static const GUID *const kinds[3] = {&FX_GUID_Keyboard, &FX_GUID_Mouse, &FX_GUID_Other};
+    void *di = NULL;
+    unsigned i;
+
+    if (FAILED(DirectInput8Create(GetModuleHandleW(NULL), 0x0800, &FX_GUID_Other, &di, NULL)) || !di) {
+        return -1;
+    }
+    for (i = 0; i < 3; ++i) {
+        fx_create_device_fn create = (fx_create_device_fn)(*(void ***)di)[3];
+        if (FAILED(create(di, kinds[i], &g_fx_input_devices[i], NULL)) || !g_fx_input_devices[i]) {
+            return -2;
+        }
+    }
+    return 0;
+}
+
+FX_API long fx_input_state(unsigned device, void *data, unsigned size)
+{
+    void *d = device < 3 ? g_fx_input_devices[device] : NULL;
+    return d ? (long)((fx_get_state_fn)(*(void ***)d)[9])(d, size, data) : -1;
+}
+
+FX_API long fx_input_events(unsigned device, void *data, unsigned object_size, unsigned long *count, unsigned flags)
+{
+    void *d = device < 3 ? g_fx_input_devices[device] : NULL;
+    return d ? (long)((fx_get_data_fn)(*(void ***)d)[10])(d, object_size, data, count, flags) : -1;
+}
+
+typedef struct fx_ui_manager_object {
+    void *const *vtbl;
+    unsigned char other[0x2C];
+    unsigned char mode, requested, pending; /* +30h, +31h, +32h */
+    unsigned char rest[0x1D];
+} fx_ui_manager_object;
+
+static void fx_ui_method(void)
+{
+}
+
+static void *const g_fx_ui_vtbl[2] = {(void *)fx_ui_method, (void *)fx_ui_method};
+static fx_ui_manager_object g_fx_ui_object = {g_fx_ui_vtbl, {0}, 0, 0, 0, {0}};
+void *g_fx_ui_manager; /* the engine's variable: NULL until the manager exists */
+
+#pragma pack(push, 1)
+typedef struct fx_pad_code_bytes {
+    unsigned char head[7]; /* mov cl,[eax+0D0h] / mov eax,[imm32] */
+    void **pointer;
+    unsigned char tail[8]; /* mov [eax+31h],cl / mov byte [eax+32h],1 / ret */
+} fx_pad_code_bytes;
+#pragma pack(pop)
+
+#if defined(_MSC_VER)
+#pragma section(".fxpad", execute, read)
+__declspec(allocate(".fxpad")) const fx_pad_code_bytes fx_pad_code = {
+#else
+const fx_pad_code_bytes fx_pad_code __attribute__((section(".fxpad,\"xr\"#"), used)) = {
+#endif
+    {0x8A, 0x88, 0xD0, 0x00, 0x00, 0x00, 0xA1}, &g_fx_ui_manager, {0x88, 0x48, 0x31, 0xC6, 0x40, 0x32, 0x01, 0xC3}};
+
+/* The manager object (64 bytes). create: the engine now has one. */
+FX_API unsigned char *fx_ui_manager(int create)
+{
+    if (create) {
+        g_fx_ui_manager = &g_fx_ui_object;
+    }
+    return fx_pad_code.pointer == &g_fx_ui_manager ? (unsigned char *)&g_fx_ui_object : NULL;
+}
+
+/* ---- files -----------------------------------------------------------------------------
+ * The engine's file class: CreateFileW (or CreateFileA), size, read, close. */
+FX_API long fx_read_file(int wide, const wchar_t *path, char *out, unsigned cap)
+{
+    HANDLE h;
+    LARGE_INTEGER size;
+    DWORD got = 0;
+    long result = -1;
+
+    if (wide) {
+        /* as the engine's file class does: the specific right, shared for reading and writing */
+        h = CreateFileW(path, FILE_READ_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                        FILE_ATTRIBUTE_NORMAL, NULL);
+    } else {
+        char narrow[MAX_PATH];
+        if (!WideCharToMultiByte(CP_ACP, 0, path, -1, narrow, sizeof(narrow), NULL, NULL)) {
+            return -1;
+        }
+        h = CreateFileA(narrow, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    }
+    if (h == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+    if (GetFileSizeEx(h, &size) && size.QuadPart <= (LONGLONG)cap && ReadFile(h, out, (DWORD)size.QuadPart, &got, NULL) &&
+        got == (DWORD)size.QuadPart) {
+        result = (long)got;
+    }
+    CloseHandle(h);
+    return result;
+}
+
+/* Appending, as the engine's file class opens a file for it: an existing file, for writing. */
+FX_API int fx_append_file(const wchar_t *path, const char *data, unsigned size)
+{
+    HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD written = 0;
+    int ok;
+
+    if (h == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+    ok = WriteFile(h, data, size, &written, NULL) && written == size;
+    CloseHandle(h);
+    return ok ? 0 : -1;
+}
+
+FX_API int fx_write_file(const wchar_t *path, const char *data, unsigned size)
+{
+    HANDLE h = CreateFileW(path, FILE_WRITE_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD written = 0;
+    int ok;
+
+    if (h == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+    ok = WriteFile(h, data, size, &written, NULL) && written == size;
+    CloseHandle(h);
+    return ok ? 0 : -1;
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
     (void)instance;

@@ -7,6 +7,7 @@
 
 #include "cpu_topology.h"
 #include "fc3pp.h"
+#include "gfx_preset.h"
 #include "ini.h"
 #include "menu_model.h"
 
@@ -46,6 +47,21 @@ const char *config_mode_name(cpu_mode mode)
     default:
         return "?";
     }
+}
+
+/* 0/1/2 or the names shown in the menu. Returns -1 when not understood. */
+static int parse_distance(const char *s)
+{
+    if (ini_streq_nocase(s, "0") || ini_streq_nocase(s, "original") || ini_streq_nocase(s, "off")) {
+        return GP_ORIGINAL;
+    }
+    if (ini_streq_nocase(s, "1") || ini_streq_nocase(s, "far")) {
+        return GP_FAR;
+    }
+    if (ini_streq_nocase(s, "2") || ini_streq_nocase(s, "veryfar") || ini_streq_nocase(s, "very far")) {
+        return GP_VERY_FAR;
+    }
+    return -1;
 }
 
 static cpu_mode parse_mode(const char *s, cpu_mode def)
@@ -128,11 +144,25 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
         }
     }
 
+    cfg->auto_switch_input = ini_get_bool(&doc, "Controls", "AutoSwitchInput", cfg->auto_switch_input);
+    {
+        const char *distance = ini_get(&doc, "Graphics", "DrawDistance");
+        if (distance && *distance) {
+            int level = parse_distance(distance);
+            if (level >= 0) {
+                cfg->draw_distance = level;
+            } else {
+                cfg->draw_distance_invalid = 1;
+            }
+        }
+    }
+
     cfg->keep_xaudio2_loaded = ini_get_bool(&doc, "Audio", "KeepXAudio2Loaded", cfg->keep_xaudio2_loaded);
 
     cfg->trace_cpu_api = ini_get_bool(&doc, "Debug", "TraceCpuApi", cfg->trace_cpu_api);
     cfg->trace_audio = ini_get_bool(&doc, "Debug", "TraceAudio", cfg->trace_audio);
     cfg->menu_open_at_start = ini_get_bool(&doc, "Debug", "MenuOpenAtStart", cfg->menu_open_at_start);
+    cfg->input_without_focus = ini_get_bool(&doc, "Debug", "InputWithoutFocus", cfg->input_without_focus);
     cfg->simulate_affinity_mask =
         ini_get_uint(&doc, "Debug", "SimulateAffinityMask", cfg->simulate_affinity_mask) & 0xFFFFFFFFul;
 

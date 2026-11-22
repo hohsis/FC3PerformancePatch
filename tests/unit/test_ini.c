@@ -173,6 +173,8 @@ static void test_config_defaults(void)
     CHECK(c.menu_enabled == 1);
     CHECK(c.menu_key == 0x77); /* F8 */
     CHECK(c.trace_audio == 0); /* diagnostics default to off */
+    CHECK(c.auto_switch_input == 0); /* not yet confirmed in play: opt-in */
+    CHECK(c.draw_distance == 0 && c.draw_distance_invalid == 0);
 }
 
 static void test_config_values(void)
@@ -182,7 +184,8 @@ static void test_config_values(void)
                                "[Memory]\nApplyLargeAddressAware=off\n[Debug]\nSimulateAffinityMask=0xFFFFFFFF\n"
                                "[Display]\nRestoreFullscreenOnFocus=0\nHighDpiAware=no\nDisableWindowGhosting=off\n"
                                "[Audio]\nKeepXAudio2Loaded=0\n[Debug]\nTraceAudio=1\n"
-                               "[Textures]\nSkipMismatchedMip0=0\nSkipReplacedTextureMip0=0\n[Menu]\nEnabled=0\nKey=Home\n";
+                               "[Textures]\nSkipMismatchedMip0=0\nSkipReplacedTextureMip0=0\n[Menu]\nEnabled=0\nKey=Home\n"
+                               "[Controls]\nAutoSwitchInput=1\n[Graphics]\nDrawDistance=2\n";
     fc3pp_config c;
     CHECK(config_load_text(&c, text, sizeof(text) - 1) == 0);
     CHECK(c.enabled == 0);
@@ -205,17 +208,27 @@ static void test_config_values(void)
     CHECK(c.menu_enabled == 0);
     CHECK(c.menu_key == 0x24 && c.menu_key_invalid == 0);
     CHECK(c.trace_audio == 1);
+    CHECK(c.auto_switch_input == 1);
+    CHECK(c.draw_distance == 2 && c.draw_distance_invalid == 0);
 }
 
 static void test_config_bad_values(void)
 {
-    static const char text[] = "[CPU]\nMode=banana\nCores=1,x\nMaxCores=lots\n";
+    static const char text[] = "[CPU]\nMode=banana\nCores=1,x\nMaxCores=lots\n[Graphics]\nDrawDistance=3\n";
+    static const char far_name[] = "[Graphics]\nDrawDistance=Far\n";
+    static const char very_far[] = "[Graphics]\nDrawDistance=VeryFar\n";
+    static const char original[] = "[Graphics]\nDrawDistance=original\n";
     fc3pp_config c;
     CHECK(config_load_text(&c, text, sizeof(text) - 1) == 0);
     CHECK(c.mode == CPU_MODE_ENGINE); /* unknown mode keeps the default */
     CHECK(c.cores_list_invalid == 1);
     CHECK_EQ_U(c.cores_mask, 0);
     CHECK(c.max_cores == 6);
+    CHECK(c.draw_distance == 0 && c.draw_distance_invalid == 1); /* out of range: the original distances */
+    CHECK(config_load_text(&c, far_name, sizeof(far_name) - 1) == 0 && c.draw_distance == 1);
+    CHECK(config_load_text(&c, very_far, sizeof(very_far) - 1) == 0 && c.draw_distance == 2);
+    CHECK(config_load_text(&c, original, sizeof(original) - 1) == 0 && c.draw_distance == 0 &&
+          c.draw_distance_invalid == 0);
     CHECK_STR(config_mode_name(CPU_MODE_OFF), "off");
     CHECK_STR(config_mode_name(CPU_MODE_ENGINE), "engine");
     CHECK_STR(config_mode_name(CPU_MODE_PROCESS), "process");

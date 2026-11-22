@@ -48,13 +48,21 @@ typedef struct fc3pp_config {
     unsigned menu_key;      /* virtual-key code that opens it */
     int menu_key_invalid;   /* the Key= value was not understood */
 
+    /* [Controls] */
+    int auto_switch_input; /* gamepad or keyboard/mouse mode follows what is used */
+
+    /* [Graphics] */
+    int draw_distance;         /* a gp_level: 0 original, 1 far, 2 very far */
+    int draw_distance_invalid; /* the DrawDistance= value was not understood */
+
     /* [Audio] */
     int keep_xaudio2_loaded; /* pin XAudio2_7.dll (documented premature-unload defect) */
 
     /* [Debug] */
     int trace_cpu_api;
     int trace_audio;
-    int menu_open_at_start; /* testing aid */
+    int menu_open_at_start;  /* testing aid */
+    int input_without_focus; /* testing aid */
     unsigned long simulate_affinity_mask;
 
     size_t malformed_lines;

@@ -21,7 +21,9 @@
 #include "log.h"
 #include "menu_draw.h"
 #include "menu_model.h"
+#include "gfx_preset.h"
 #include "overlay.h"
+#include "padswitch.h"
 #include "pe_image.h"
 #include "texguard.h"
 #include "vtable.h"
@@ -42,10 +44,13 @@ enum {
     ID_TEX_MISMATCHED,
     ID_TEX_REPLACED,
     ID_KEEP_XAUDIO,
+    ID_AUTO_SWITCH,
+    ID_DRAW_DISTANCE,
     ID_CLOSE
 };
 
 static const char *const MODE_NAMES[] = {"off", "engine", "process"};
+static const char *const DISTANCE_NAMES[] = {"Original", "Far", "Very far"};
 
 #define HEADING(text) {MM_HEADING, ID_NONE, text, NULL, 0, 0, 0, 0, NULL, 0, 0, ""}
 #define INFO(id, text) {MM_INFO, id, text, NULL, 0, 0, 0, 0, NULL, 0, 0, ""}
@@ -71,6 +76,14 @@ static mm_item g_items[] = {
     TOGGLE(ID_RESTORE_FULLSCREEN, "Fullscreen after Alt+Tab",
            "Return to fullscreen when you switch back to the game, instead of staying in a window."),
     TOGGLE(ID_DPI_AWARE, "DPI aware", "Stops Windows from scaling the game's window on displays set above 100 %."),
+    {MM_CHOICE, ID_DRAW_DISTANCE, "Draw distance",
+     "Keeps detailed models, trees, terrain and sun shadows up to further away. Costs frame rate; 'Very far' "
+     "costs a lot.",
+     0, 0, GP_LEVELS - 1, 1, DISTANCE_NAMES, GP_LEVELS, MM_RESTART, ""},
+    HEADING("Controls"),
+    {MM_TOGGLE, ID_AUTO_SWITCH, "Gamepad or keyboard by use",
+     "The game follows whichever you touch: gamepad, or keyboard and mouse. Works at once, no restart.", 0, 0, 1, 1,
+     NULL, 0, 0, ""},
     HEADING("Texture mods"),
     TOGGLE(ID_TEX_MISMATCHED, "Leave out levels that do not fit",
            "Texture mods crash the game without this, unless mip0 loading is switched off in GamerProfile.xml."),
@@ -87,6 +100,7 @@ static mm_menu g_menu = {FC3PP_NAME " " FC3PP_VERSION, g_items, sizeof(g_items) 
 static wchar_t g_ini_path[MAX_PATH + 40];
 static unsigned g_key = VK_F8;
 static int g_enabled;
+static int g_auto_switch; /* asked for in the INI file */
 
 static volatile LONG g_open;          /* read by the input hooks on other threads */
 static volatile LONG g_hold_keyboard; /* closed, but keys that operated it are still down */
@@ -128,6 +142,9 @@ void menu_init(const fc3pp_config *cfg, const wchar_t *ini_path)
     set_value(ID_TEX_MISMATCHED, cfg->texture_guard);
     set_value(ID_TEX_REPLACED, cfg->texture_scan);
     set_value(ID_KEEP_XAUDIO, cfg->keep_xaudio2_loaded);
+    set_value(ID_AUTO_SWITCH, cfg->auto_switch_input);
+    set_value(ID_DRAW_DISTANCE, cfg->draw_distance);
+    g_auto_switch = cfg->auto_switch_input;
     it = mm_find(&g_menu, ID_STATUS_VERSION);
     if (it) {
         snprintf(it->text, sizeof(it->text), "%s", FC3PP_VERSION);
@@ -191,6 +208,13 @@ static void save(int id)
     case ID_KEEP_XAUDIO:
         section = L"Audio", key = L"KeepXAudio2Loaded";
         break;
+    case ID_AUTO_SWITCH:
+        section = L"Controls", key = L"AutoSwitchInput";
+        padswitch_enable(it->value);
+        break;
+    case ID_DRAW_DISTANCE:
+        section = L"Graphics", key = L"DrawDistance";
+        break;
     default:
         return;
     }
@@ -199,7 +223,8 @@ static void save(int id)
         LOGE("menu: could not save %ls to the INI file (error %lu); is the game folder writable?", key,
              (unsigned long)GetLastError());
     } else {
-        LOGI("menu: [%ls] %ls=%ls saved; it takes effect the next time the game starts", section, key, value);
+        LOGI("menu: [%ls] %ls=%ls saved%s", section, key, value,
+             (it->flags & MM_RESTART) ? "; it takes effect the next time the game starts" : "");
     }
 }
 
@@ -280,10 +305,15 @@ static DWORD WINAPI hook_xinput_get_state(DWORD index, xi_state *state)
 {
     DWORD result = g_xi_real ? g_xi_real(index, state) : ERROR_DEVICE_NOT_CONNECTED;
 
-    if (result == ERROR_SUCCESS && state && (g_open || g_hold_gamepad)) {
-        DWORD packet = state->packet;
-        memset(state, 0, sizeof(*state));
-        state->packet = packet;
+    if (result == ERROR_SUCCESS && state) {
+        if (g_open || g_hold_gamepad) {
+            DWORD packet = state->packet;
+            memset(state, 0, sizeof(*state));
+            state->packet = packet;
+        } else {
+            padswitch_gamepad(state->buttons, state->left_trigger, state->right_trigger, state->lx, state->ly,
+                              state->rx, state->ry);
+        }
     }
     return result;
 }
@@ -309,17 +339,75 @@ static vt_hook g_di_vtables[VT_MAX_TABLES];
 static vt_hook g_state_vtables[VT_MAX_TABLES];
 static vt_hook g_data_vtables[VT_MAX_TABLES];
 static void *g_devices[MAX_DEVICES]; /* the keyboard and mouse devices the engine created */
+static unsigned char g_device_is_mouse[MAX_DEVICES];
 static SRWLOCK g_di_lock = SRWLOCK_INIT;
 
-static int is_blocked_device(const void *device)
+enum { DEVICE_OTHER = 0, DEVICE_KEYBOARD, DEVICE_MOUSE };
+
+static int device_kind(const void *device)
 {
     unsigned i;
     for (i = 0; i < MAX_DEVICES; ++i) {
         if (g_devices[i] == device) {
-            return 1;
+            return g_device_is_mouse[i] ? DEVICE_MOUSE : DEVICE_KEYBOARD;
         }
     }
-    return 0;
+    return DEVICE_OTHER;
+}
+
+/* What the game just read, for switching between gamepad and keyboard/mouse.
+ * The standard formats: 256 key bytes; three axes (relative) and 4 or 8
+ * button bytes. */
+static void note_device_state(int kind, const unsigned char *data, DWORD size)
+{
+    DWORD i;
+    int down = 0;
+
+    if (kind == DEVICE_KEYBOARD) {
+        for (i = 0; i < size && !down; ++i) {
+            down = (data[i] & 0x80) != 0;
+        }
+        padswitch_keyboard(down);
+    } else if (size == 16 || size == 20) {
+        LONG axis[3];
+        long travel = 0;
+        memcpy(axis, data, sizeof(axis));
+        for (i = 0; i < 3; ++i) {
+            travel += axis[i] < 0 ? -axis[i] : axis[i];
+        }
+        for (i = 12; i < size && !down; ++i) {
+            down = (data[i] & 0x80) != 0;
+        }
+        padswitch_mouse(travel, down);
+    }
+}
+
+/* The same from buffered events: { offset, data, time, sequence, ... } each. */
+static void note_device_events(int kind, const unsigned char *events, DWORD object_size, DWORD count)
+{
+    DWORD i;
+    long travel = 0;
+    int down = 0;
+
+    if (object_size < 8) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        DWORD offset, value;
+        memcpy(&offset, events + (size_t)i * object_size, 4);
+        memcpy(&value, events + (size_t)i * object_size + 4, 4);
+        if (kind == DEVICE_MOUSE && offset < 12) {
+            LONG moved = (LONG)value;
+            travel += moved < 0 ? -moved : moved;
+        } else if (value & 0x80) {
+            down = 1;
+        }
+    }
+    if (kind == DEVICE_KEYBOARD) {
+        padswitch_keyboard(down);
+    } else {
+        padswitch_mouse(travel, down);
+    }
 }
 
 static HRESULT STDMETHODCALLTYPE hook_get_device_state(void *self, DWORD size, void *data)
@@ -330,14 +418,18 @@ static HRESULT STDMETHODCALLTYPE hook_get_device_state(void *self, DWORD size, v
 
     AcquireSRWLockShared(&g_di_lock);
     original = (di_get_state_fn)vt_original(g_state_vtables, VT_OF(self));
-    ours = is_blocked_device(self);
+    ours = device_kind(self);
     ReleaseSRWLockShared(&g_di_lock);
     if (!original) {
         return E_FAIL;
     }
     hr = original(self, size, data);
-    if (SUCCEEDED(hr) && ours && data && (g_open || g_hold_keyboard)) {
-        memset(data, 0, size); /* no key down, no mouse movement */
+    if (SUCCEEDED(hr) && ours && data) {
+        if (g_open || g_hold_keyboard) {
+            memset(data, 0, size); /* no key down, no mouse movement */
+        } else if (padswitch_enabled()) {
+            note_device_state(ours, (const unsigned char *)data, size);
+        }
     }
     return hr;
 }
@@ -351,14 +443,18 @@ static HRESULT STDMETHODCALLTYPE hook_get_device_data(void *self, DWORD object_s
 
     AcquireSRWLockShared(&g_di_lock);
     original = (di_get_data_fn)vt_original(g_data_vtables, VT_OF(self));
-    ours = is_blocked_device(self);
+    ours = device_kind(self);
     ReleaseSRWLockShared(&g_di_lock);
     if (!original) {
         return E_FAIL;
     }
     hr = original(self, object_size, data, count, flags);
-    if (SUCCEEDED(hr) && ours && count && (g_open || g_hold_keyboard)) {
-        *count = 0; /* the buffered events are dropped */
+    if (SUCCEEDED(hr) && ours && count) {
+        if (g_open || g_hold_keyboard) {
+            *count = 0; /* the buffered events are dropped */
+        } else if (data && *count && padswitch_enabled()) {
+            note_device_events(ours, (const unsigned char *)data, object_size, *count);
+        }
     }
     return hr;
 }
@@ -388,7 +484,9 @@ static HRESULT STDMETHODCALLTYPE hook_create_device(void *self, REFGUID guid, vo
         vt_hook_slot(g_data_vtables, VT_OF(*device), SLOT_DEVICE_GET_DATA, (void *)hook_get_device_data)) {
         for (i = 0; i < MAX_DEVICES && g_devices[i] && g_devices[i] != *device; ++i) {
         }
-        g_devices[i < MAX_DEVICES ? i : 0] = *device;
+        i = i < MAX_DEVICES ? i : 0;
+        g_devices[i] = *device;
+        g_device_is_mouse[i] = memcmp(guid, &GUID_Mouse, sizeof(GUID)) == 0;
     }
     ReleaseSRWLockExclusive(&g_di_lock);
     return hr;
@@ -410,8 +508,16 @@ unsigned menu_install_hooks(HMODULE engine)
 {
     unsigned hooks = 0;
     void *previous = NULL;
+    mm_item *it = mm_find(&g_menu, ID_AUTO_SWITCH);
 
-    if (!g_enabled) {
+    if (it && !padswitch_available()) {
+        /* nothing to switch in this build of the game: show that instead */
+        it->kind = MM_INFO;
+        snprintf(it->text, sizeof(it->text), "not available");
+    }
+    /* The input hooks serve the menu and the switching; without both, the
+     * game's input is left entirely alone. */
+    if (!g_enabled && !(g_auto_switch && padswitch_available())) {
         return 0;
     }
     if (pei_hook_import(engine, "xinput1_3.dll", "#2", (void *)hook_xinput_get_state, &previous) == 1 && previous) {
@@ -423,6 +529,10 @@ unsigned menu_install_hooks(HMODULE engine)
         previous) {
         memcpy(&g_di_create, &previous, sizeof(previous));
         ++hooks;
+    }
+    LOGD("input: the game's gamepad and keyboard/mouse reads go through the patch (%u of 2 hooks)", hooks);
+    if (!g_enabled) {
+        return hooks;
     }
     if (g_key >= VK_F1 && g_key <= VK_F12) {
         LOGI("menu: F%u opens the settings menu; on a gamepad, hold both thumbsticks in", g_key - VK_F1 + 1);
@@ -558,6 +668,8 @@ void menu_on_present(void *swap_chain)
         /* Nothing can be shown: do not leave the game deaf behind an invisible menu. */
         mm_open(&g_menu, 0);
         InterlockedExchange(&g_open, 0);
+        InterlockedExchange(&g_hold_keyboard, 0);
+        InterlockedExchange(&g_hold_gamepad, 0);
         g_enabled = 0;
         return;
     }

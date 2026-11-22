@@ -537,7 +537,8 @@ tools exist, so extending them was not an option.
   So that the game does not act on the same input, the engine's import of `XInputGetState` (by ordinal,
   from `xinput1_3.dll`) and the keyboard and mouse devices it creates through `DirectInput8Create` are
   wrapped: while the menu is open, and until the keys that closed it are up again, the engine is told
-  that nothing is pressed. DirectInput game controllers are left alone.
+  that nothing is pressed. DirectInput game controllers are left alone. The runtime tests exercise this
+  against stand-in input DLLs, including a menu that has to give up: the input then flows again.
 - **Settings.** A change is written to the INI file with `WritePrivateProfileString`, which keeps the
   file's comments. Most of the current settings are read once at start-up, so the menu says when a change
   needs a restart.
@@ -549,7 +550,118 @@ on a stand-in swap chain, including a menu that cannot draw. **It has not been u
 yet**, and nothing is known about how it behaves under the Steam or Ubisoft Connect overlays, with DXVK,
 or in exclusive fullscreen. It does not exist for the DX9 executables.
 
-## 11. Control Flow Guard
+## 11. Gamepad or keyboard by use (`[Controls] AutoSwitchInput`)
+
+Off by default; not yet tried in play.
+
+### How the game chooses its input mode
+
+The game is in one of two modes, chosen with "Use gamepad" in its options and stored in the profile.
+The mode decides the button prompts and menus, and a global flag that some fifty functions read. The
+state lives in three bytes of the UI manager object:
+
+| Offset | Meaning |
+|---|---|
+| `+30h` | the mode in effect (1 = gamepad) |
+| `+31h` | the mode asked for |
+| `+32h` | "a change was asked for" |
+
+Once per frame (RVA `0x16610C0`) the engine computes *asked for AND a gamepad is connected*; if that
+differs from the mode in effect, or the third byte is set, it switches: the mode in effect, the global
+flag, and a notification to the UI. The options menu and the profile loader do nothing more than
+write `+31h` and `+32h`. Nothing in the engine changes the mode because of what the player touches.
+
+### What the patch does
+
+It writes `+31h`, the same byte the options menu writes, when the input hooks of the in-game menu
+(section 10) see the other kind of device in use:
+
+- gamepad: a button, a trigger beyond 40 of 255, or a stick beyond 12000 of 32767 in the state the
+  engine reads with `XInputGetState`;
+- keyboard: a key down in what the engine reads from its DirectInput keyboard;
+- mouse: a button, or 12 counts of movement within a quarter of a second (a mouse lying on the desk
+  produces a count now and then).
+
+The device in use keeps the mode: the other one must find it idle for 0.4 s before it can take over,
+so a hand leaving the mouse or a pad being put down does not switch back. A gamepad only counts while
+the game has the focus. If the game stops reading its keyboard while in gamepad mode, a key press is
+noticed through `GetAsyncKeyState` instead. `+32h` is left alone, so the engine acts only when the
+mode really changes, and the profile's "Use gamepad" setting stays what the options menu made it.
+No game code is patched.
+
+The UI manager is found through the code that copies the profile's setting to it, which holds the
+address of the variable pointing to it: inlined in Far Cry 3
+(`8A 88 D0 00 00 00 A1 <ptr> 88 48 31 C6 40 32 01 C3`), a call to a small setter in Blood Dragon. Before
+its first write the patch checks that the object is writable memory whose first word points into the
+engine module (its virtual table); if not, it does nothing for the rest of the session.
+
+Status: the signature matches exactly one place in all four engine DLLs (`FC3.dll` and
+`FC3_d3d11.dll` of both games) and yields a variable in the module's writable data; the decisions
+have unit tests; the whole path runs in the runtime tests against stand-in `xinput1_3.dll` and
+`dinput8.dll`, in both directions, with DX11 and DX9 stand-ins. **Not tried in the game.** Open
+questions: whether every screen follows a switch made mid-play, and layouts in which a controller also
+produces mouse or keyboard input (Steam Input with a trackpad or gyro as mouse), where the two kinds
+of input would take turns.
+
+## 12. Draw distance (`[Graphics] DrawDistance`)
+
+Off by default; not yet tried in play.
+
+### Where the distances come from
+
+The renderer's settings are an object filled from XML by reflection. Its defaults are in
+`engine\settings\DefaultRenderConfig.xml` inside the game's archives: one section per subject, each
+with a `<quality id="...">` element per quality level:
+
+```xml
+<Geometry> <quality id="ultrahigh" LodScale="0.5" KillLodScale="0.5" RealTreesLodScale="0.7" .../> </Geometry>
+<Shadow>   <quality id="ultrahigh" SunShadowRange0="3" SunShadowRange1="12" SunShadowRange2="60" .../> </Shadow>
+<Terrain>  <quality id="high" TerrainLodScale="1.0" TerrainDetailViewDistance="512" .../> </Terrain>
+```
+
+The `<RenderProfile>` element of the player's `GamerProfile.xml` is described by the same reflection
+data and read afterwards, so a section placed there takes the place of the default one. This is the
+long-known manual tweak of pasting such sections into the profile, and also why that tweak never
+lasts: the game does not write the sections out again when it saves the profile.
+
+### What the patch does
+
+With a preset selected it hooks the engine's `CreateFileW` and `CreateFileA` imports. When
+`GamerProfile.xml` is opened for reading, the patch reads the file, reads the default render
+configuration from the archives (`patch.fat` first, so a mod's values are the starting point, else
+`common.fat`), and copies the three sections above into the profile text with these values
+multiplied:
+
+| Section | Values | Far | Very far |
+|---|---|---|---|
+| Geometry | `LodScale`, `KillLodScale`, `RealTreesLodScale`, `RealTreesVistaMinViewDistanceScale` | x0.7 | x0.5 |
+| Shadow | `SunShadowRange0`, `1`, `2` (the far ends of the three sun shadow cascades) | x1.5 | x2 |
+| Terrain | `TerrainLodScale` | x0.7 | x0.5 |
+| Terrain | `TerrainDetailViewDistance`, `TerrainDetailBlendViewDistance` | x1.5 | x2 |
+
+For the level-of-detail scales smaller means further: the game's own *ultra* level has 0.5 where *high*
+has 1.0. Every quality level is scaled, so the preset works on top of whatever quality is selected in
+the game. The result goes to a temporary file that is opened for the game in place of the profile,
+with the game's own access and flags, and that deletes itself when the game closes it. Opens for
+writing are passed through, so the game saves to the real file, and nothing of the preset ever lands
+there. A section of the same name that the player has put into the profile is kept and not doubled.
+If anything is missing or not in the expected form, the game gets its file as it is and the log says
+why. The first time a preset is applied, the profile is copied next to itself as
+`GamerProfile.xml.fc3pp.bak`; the copy is never overwritten.
+
+The engine's own file class (RVA `0x1796730`) opens a file for reading with `FILE_READ_DATA`,
+`OPEN_EXISTING`, and for writing with `FILE_WRITE_DATA` or `FILE_APPEND_DATA` and `CREATE_ALWAYS` or
+`OPEN_ALWAYS`; only an open that asks for no right to change anything is redirected.
+
+Status: unit tests for the text handling; the runtime tests read a profile through a stand-in engine
+both ways, check what arrives, that the file on disk and other files are untouched and that no
+temporary file is left; the default render configuration is read from the real archives of both
+games (a mod's 31 KB file in a modded Far Cry 3, the original 56 KB LZO-compressed one in Blood
+Dragon) and scaled. **Not tried in the game**: that the engine opens its profile through one of the
+two hooked calls (the log says at exit if it did not), that it takes the sections, and what they
+cost in frame rate are all still to be seen.
+
+## 13. Control Flow Guard
 
 None of the game binaries are built with CFG (`IMAGE_DLLCHARACTERISTICS_GUARD_CF` is clear in all of them).
 Disabling CFG per executable in Windows Exploit Protection is a frequently repeated community fix for long
@@ -557,13 +669,13 @@ freezes in this and other games; the evidence is anecdotal and no mechanism was 
 patch does not change it: it would lower a security mitigation for the named executable on the strength
 of anecdote.
 
-## 12. Tests and their limits
+## 14. Tests and their limits
 
 | Layer | Method |
 |---|---|
 | Logic | Unit tests for every pure module; the four loop variants are executed as machine code before and after patching |
-| Real engine code | The game's own function, called in isolation from the user's DLLs (section 2); the texture guard installed on the game's real texture class table and called through it (section 9) |
-| Process integration | A 32-bit host with stand-in modules named like the engine's, in 24 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
+| Real engine code | The game's own function, called in isolation from the user's DLLs (section 2); the texture guard installed on the game's real texture class table and called through it (section 9); the input-mode code located in all four engine DLLs (section 11); the render configuration read from the real archives (section 12) |
+| Process integration | A 32-bit host with stand-in modules named like the engine's, in 31 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the input hooks and mode switching against stand-in `xinput1_3.dll` and `dinput8.dll`, the draw-distance presets against a stand-in profile and archives, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
 | Rendering | The in-game menu drawn on a real Direct3D 11 device, the picture and the restored device state checked |
 | Other processors | The same test suite on an ARM64 runner, the 32-bit test programs translated by FEX inside ARM64 Wine |

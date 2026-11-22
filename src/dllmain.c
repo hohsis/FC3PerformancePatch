@@ -18,10 +18,12 @@
 #include "cpu_topology.h"
 #include "display.h"
 #include "fc3pp.h"
+#include "gfx_profile.h"
 #include "ini.h"
 #include "laa.h"
 #include "log.h"
 #include "menu.h"
+#include "padswitch.h"
 #include "patches.h"
 #include "pe_image.h"
 #include "proxy.h"
@@ -286,7 +288,9 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
         } else {
             menu_set_unavailable();
         }
+        padswitch_install(mod, name, g_cfg.auto_switch_input, g_cfg.input_without_focus);
         hooks += menu_install_hooks(mod);
+        hooks += gfx_profile_install(mod, g_cfg.draw_distance);
         hooks += audio_install(mod, &g_cfg);
         if (g_cfg.texture_guard) {
             texguard_install(mod, name, g_cfg.texture_scan);
@@ -457,6 +461,9 @@ static void fc3pp_init(HINSTANCE self)
     }
 
     g_active = 1;
+    if (g_cfg.draw_distance_invalid) {
+        LOGE("config: the [Graphics] DrawDistance= value is not 0, 1 or 2; the original distances are used");
+    }
     if (g_cfg.menu_key_invalid) {
         LOGE("config: the [Menu] Key= value is not a key name this patch knows (F1 to F12, Home, End, Insert, "
              "Delete, Pause, ScrollLock, PageUp, PageDown, Tab); using F8");
@@ -497,6 +504,8 @@ static void fc3pp_shutdown(int process_terminating)
         shim_log_stats();
         audio_log_stats();
         texguard_log_stats();
+        padswitch_log_stats();
+        gfx_profile_log_stats();
         LOGI("process exit");
         return;
     }
@@ -507,6 +516,8 @@ static void fc3pp_shutdown(int process_terminating)
     shim_log_stats();
     audio_log_stats();
     texguard_log_stats();
+    padswitch_log_stats();
+    gfx_profile_log_stats();
     LOGI("unloaded");
     log_shutdown();
     proxy_shutdown();

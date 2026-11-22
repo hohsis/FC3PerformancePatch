@@ -61,5 +61,7 @@ void suite_fs_guard(void);
 void suite_tex_rule(void);
 void suite_dunia(void);
 void suite_menu(void);
+void suite_padmode(void);
+void suite_gfx_preset(void);
 
 #endif /* FC3PP_TEST_H */

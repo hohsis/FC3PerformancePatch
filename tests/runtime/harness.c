@@ -42,6 +42,15 @@ __declspec(dllimport) int fx_tex_drop(void *texture);
 __declspec(dllimport) void fx_tex_destroy(void *texture);
 __declspec(dllimport) void fx_tex_fail_next_add(void *texture, int fail);
 __declspec(dllimport) void fx_tex_state(void *texture, unsigned out[6]);
+__declspec(dllimport) unsigned long fx_pad_read(unsigned index, void *state);
+__declspec(dllimport) int fx_input_open(void);
+__declspec(dllimport) long fx_input_state(unsigned device, void *data, unsigned size);
+__declspec(dllimport) long fx_input_events(unsigned device, void *data, unsigned object_size,
+                                           unsigned long *count, unsigned flags);
+__declspec(dllimport) unsigned char *fx_ui_manager(int create);
+__declspec(dllimport) long fx_read_file(int wide, const wchar_t *path, char *out, unsigned cap);
+__declspec(dllimport) int fx_write_file(const wchar_t *path, const char *data, unsigned size);
+__declspec(dllimport) int fx_append_file(const wchar_t *path, const char *data, unsigned size);
 
 static int g_checks;
 static int g_failures;
@@ -877,6 +886,409 @@ static void scenario_menu(void)
     CHECK(fx_dxgi_present() == 0 && presents() == 6, "the second swap chain does not present");
 }
 
+/* ---- gamepad, keyboard and mouse ---------------------------------------------------------
+ * The engine fixture reads a gamepad (fake xinput1_3.dll) and DirectInput
+ * devices (fake dinput8.dll) the way the game does. What the patch may do in
+ * between: switch the game's input mode by writing one byte of its UI manager,
+ * and hold the input back while the settings menu is open. */
+
+typedef struct pad_state {
+    DWORD packet;
+    WORD buttons;
+    BYTE left_trigger, right_trigger;
+    SHORT lx, ly, rx, ry;
+} pad_state;
+
+typedef struct input_event {
+    DWORD offset, data, time, sequence;
+    UINT_PTR app;
+} input_event;
+
+typedef void (*fxxi_set_fn)(int connected, unsigned buttons, int right_trigger, int lx);
+typedef void (*fxdi_key_fn)(unsigned scan_code, int down);
+typedef void (*fxdi_move_fn)(long dx, long dy);
+typedef void (*fxdi_button_fn)(unsigned button, int down);
+typedef void (*fxdi_fill_fn)(unsigned char value);
+typedef void (*fxdi_reset_fn)(void);
+
+static fxxi_set_fn pad_set;
+static fxdi_key_fn key_set;
+static fxdi_move_fn mouse_move;
+static fxdi_button_fn mouse_button;
+static fxdi_fill_fn other_fill;
+static fxdi_reset_fn devices_reset;
+
+#define MODE_IN_EFFECT 0x30
+#define MODE_ASKED_FOR 0x31
+#define MODE_PENDING 0x32
+#define PAD_A 0x1000u
+#define KEY_W 0x11u
+#define SETTLE_MS 550 /* longer than the patch waits for the device last used to come to rest */
+
+static int input_fixtures(void)
+{
+    HMODULE xi = GetModuleHandleA("xinput1_3.dll"), di = GetModuleHandleA("dinput8.dll");
+
+    pad_set = xi ? (fxxi_set_fn)(void *)GetProcAddress(xi, "fxxi_set") : NULL;
+    key_set = di ? (fxdi_key_fn)(void *)GetProcAddress(di, "fxdi_key") : NULL;
+    mouse_move = di ? (fxdi_move_fn)(void *)GetProcAddress(di, "fxdi_mouse_move") : NULL;
+    mouse_button = di ? (fxdi_button_fn)(void *)GetProcAddress(di, "fxdi_mouse_button") : NULL;
+    other_fill = di ? (fxdi_fill_fn)(void *)GetProcAddress(di, "fxdi_other_fill") : NULL;
+    devices_reset = di ? (fxdi_reset_fn)(void *)GetProcAddress(di, "fxdi_reset") : NULL;
+    CHECK(pad_set != NULL, "the loaded xinput1_3.dll is not the test fixture");
+    CHECK(key_set && mouse_move && mouse_button && other_fill && devices_reset,
+          "the loaded dinput8.dll is not the test fixture");
+    return pad_set && key_set && mouse_move && mouse_button && other_fill && devices_reset;
+}
+
+/* One frame's worth of reading, as the game does it. Returns the gamepad
+ * buttons the engine saw. */
+static unsigned read_pad(void)
+{
+    pad_state st;
+    memset(&st, 0xEE, sizeof(st));
+    if (fx_pad_read(0, &st) != ERROR_SUCCESS) {
+        return 0xFFFFFFFFu;
+    }
+    return st.buttons;
+}
+
+static int key_seen(unsigned scan_code)
+{
+    unsigned char keys[256];
+    memset(keys, 0xEE, sizeof(keys));
+    return fx_input_state(0, keys, sizeof(keys)) == 0 && keys[scan_code] == 0x80;
+}
+
+/* switching: 1 = the patch is to follow the device in use, 0 = it is not. */
+static void scenario_input(int switching)
+{
+    unsigned char *mgr = fx_ui_manager(0);
+    unsigned char before[64];
+    unsigned char mouse[16];
+    input_event events[4];
+    pad_state st;
+    unsigned long count;
+    LONG axis[3];
+    unsigned i, changed = 0;
+    unsigned char expect;
+
+    if (!input_fixtures()) {
+        return;
+    }
+    CHECK(mgr != NULL, "the engine fixture's input-mode code does not point at its manager variable");
+    if (!mgr) {
+        return;
+    }
+    CHECK(fx_input_open() == 0, "the engine fixture could not create its input devices");
+
+    /* The game has no UI manager yet (early start-up): input flows, nothing is written. */
+    pad_set(1, PAD_A, 0, 0);
+    CHECK(read_pad() == PAD_A, "the engine does not see the gamepad button");
+    key_set(KEY_W, 1);
+    CHECK(key_seen(KEY_W), "the engine does not see the key");
+    key_set(KEY_W, 0);
+    CHECK(!key_seen(KEY_W), "the engine does not see the key released");
+    CHECK(mgr[MODE_ASKED_FOR] == 0 && mgr[MODE_PENDING] == 0, "the input mode was written before the game had one");
+
+    /* Now it has one, in keyboard/mouse mode. The player picks up the gamepad. */
+    fx_ui_manager(1);
+    memcpy(before, mgr, sizeof(before));
+    Sleep(SETTLE_MS);
+    CHECK(read_pad() == PAD_A, "the engine does not see the gamepad button");
+    expect = switching ? 1 : 0;
+    CHECK(mgr[MODE_ASKED_FOR] == expect, "gamepad in use: mode asked for is %u, expected %u", mgr[MODE_ASKED_FOR], expect);
+    for (i = 0; i < sizeof(before); ++i) {
+        changed += i != MODE_ASKED_FOR && mgr[i] != before[i];
+    }
+    CHECK(changed == 0, "%u other bytes of the game's object were changed", changed);
+    CHECK(mgr[MODE_IN_EFFECT] == 0 && mgr[MODE_PENDING] == 0, "more than the mode asked for was written");
+    /* a pad that is not connected stays not connected */
+    memset(&st, 0xEE, sizeof(st));
+    CHECK(fx_pad_read(1, &st) == ERROR_DEVICE_NOT_CONNECTED && st.buttons == 0xEEEE,
+          "a gamepad that is not connected was reported differently");
+
+    /* A key while the pad is still held: the pad keeps the mode. */
+    key_set(KEY_W, 1);
+    CHECK(key_seen(KEY_W), "the engine does not see the key");
+    CHECK(mgr[MODE_ASKED_FOR] == expect, "a key pressed while the gamepad is in use switched the mode");
+    /* The pad is put down; the key is still held a moment later. */
+    pad_set(1, 0, 0, 3000); /* a stick slightly off centre is a pad at rest */
+    CHECK(read_pad() == 0, "the engine does not see the gamepad at rest");
+    Sleep(SETTLE_MS);
+    CHECK(read_pad() == 0 && key_seen(KEY_W), "input is not flowing");
+    CHECK(mgr[MODE_ASKED_FOR] == 0, "keyboard in use: the mode asked for is still %u", mgr[MODE_ASKED_FOR]);
+    key_set(KEY_W, 0);
+    CHECK(!key_seen(KEY_W), "the engine does not see the key released");
+
+    /* Trigger and stick count as use of the pad, too. */
+    Sleep(SETTLE_MS);
+    pad_set(1, 0, 200, 0);
+    CHECK(read_pad() == 0, "the trigger changed the buttons");
+    CHECK(mgr[MODE_ASKED_FOR] == expect, "trigger pulled: mode asked for is %u", mgr[MODE_ASKED_FOR]);
+    pad_set(1, 0, 0, 0);
+    read_pad();
+
+    /* The mouse: lying on the desk it jitters by a count; a hand moves it. */
+    Sleep(SETTLE_MS);
+    mouse_move(1, 0);
+    memset(mouse, 0xEE, sizeof(mouse));
+    CHECK(fx_input_state(1, mouse, sizeof(mouse)) == 0, "the mouse could not be read");
+    memcpy(axis, mouse, sizeof(axis));
+    CHECK(axis[0] == 1 && axis[1] == 0 && mouse[12] == 0, "the engine does not see the mouse movement");
+    CHECK(mgr[MODE_ASKED_FOR] == expect, "a mouse jitter of one count switched the mode");
+    mouse_move(40, -25);
+    CHECK(fx_input_state(1, mouse, sizeof(mouse)) == 0, "the mouse could not be read");
+    memcpy(axis, mouse, sizeof(axis));
+    CHECK(axis[0] == 40 && axis[1] == -25, "the engine does not see the mouse movement");
+    CHECK(mgr[MODE_ASKED_FOR] == 0, "mouse in use: the mode asked for is still %u", mgr[MODE_ASKED_FOR]);
+
+    /* The same through buffered events, which is the other way to read a device. */
+    Sleep(SETTLE_MS);
+    pad_set(1, PAD_A, 0, 0);
+    read_pad();
+    pad_set(1, 0, 0, 0);
+    read_pad();
+    CHECK(mgr[MODE_ASKED_FOR] == expect, "gamepad in use again: mode asked for is %u", mgr[MODE_ASKED_FOR]);
+    devices_reset();
+    Sleep(SETTLE_MS);
+    mouse_button(0, 1);
+    count = 4;
+    memset(events, 0xEE, sizeof(events));
+    CHECK(fx_input_events(1, events, sizeof(events[0]), &count, 0) == 0 && count == 1 && events[0].offset == 12 &&
+              events[0].data == 0x80,
+          "the engine does not see the buffered mouse click (%lu events)", count);
+    CHECK(mgr[MODE_ASKED_FOR] == 0, "mouse click: the mode asked for is still %u", mgr[MODE_ASKED_FOR]);
+    mouse_button(0, 0);
+    count = 4;
+    fx_input_events(1, events, sizeof(events[0]), &count, 0);
+
+    Sleep(SETTLE_MS);
+    pad_set(1, PAD_A, 0, 0);
+    read_pad();
+    pad_set(1, 0, 0, 0);
+    read_pad();
+    Sleep(SETTLE_MS);
+    key_set(KEY_W, 1);
+    count = 0; /* asking how many there are, without a buffer, is not "reading a key" */
+    CHECK(fx_input_events(0, NULL, sizeof(events[0]), &count, 1) == 0, "peeking at the keyboard failed");
+    count = 4;
+    CHECK(fx_input_events(0, events, sizeof(events[0]), &count, 0) == 0 && count == 1 && events[0].offset == KEY_W &&
+              events[0].data == 0x80,
+          "the engine does not see the buffered key press (%lu events)", count);
+    CHECK(mgr[MODE_ASKED_FOR] == 0, "key press: the mode asked for is still %u", mgr[MODE_ASKED_FOR]);
+    key_set(KEY_W, 0);
+    devices_reset();
+
+    /* A device that is neither keyboard nor mouse is none of the patch's business. */
+    Sleep(SETTLE_MS);
+    pad_set(1, PAD_A, 0, 0);
+    read_pad();
+    pad_set(1, 0, 0, 0);
+    read_pad();
+    Sleep(SETTLE_MS);
+    other_fill(0x80);
+    memset(before, 0, sizeof(before));
+    CHECK(fx_input_state(2, before, 64) == 0 && before[0] == 0x80 && before[63] == 0x80,
+          "another input device was not read unchanged");
+    CHECK(mgr[MODE_ASKED_FOR] == expect, "another input device switched the mode");
+
+    /* The player sets the mode in the game's options menu: that is where the patch starts from. */
+    mgr[MODE_ASKED_FOR] = 0;
+    mgr[MODE_PENDING] = 1;
+    read_pad();
+    CHECK(mgr[MODE_ASKED_FOR] == 0 && mgr[MODE_PENDING] == 1, "a gamepad at rest changed the mode");
+}
+
+/* The settings menu is open (it opens at start in this scenario): the game
+ * must see a gamepad at rest, no keys and no mouse, until the menu is gone.
+ * The fake swap chain cannot be drawn on, so the first frame closes the menu
+ * for good - and the input must flow again. */
+static void scenario_input_held(void)
+{
+    unsigned char *mgr = fx_ui_manager(1);
+    unsigned char keys[256], mouse[16], other[64];
+    input_event events[4];
+    pad_state st;
+    unsigned long count;
+
+    if (!input_fixtures() || !mgr) {
+        CHECK(mgr != NULL, "the engine fixture has no UI manager");
+        return;
+    }
+    CHECK(fx_input_open() == 0, "the engine fixture could not create its input devices");
+    pad_set(1, PAD_A, 255, 30000);
+    key_set(KEY_W, 1);
+    mouse_move(50, 50);
+    mouse_button(1, 1);
+    other_fill(0x80);
+
+    memset(&st, 0xEE, sizeof(st));
+    CHECK(fx_pad_read(0, &st) == ERROR_SUCCESS, "the gamepad disappeared while the menu is open");
+    CHECK(st.buttons == 0 && st.right_trigger == 0 && st.lx == 0 && st.packet != 0 && st.packet != 0xEEEEEEEEul,
+          "the game sees the gamepad while the menu is open");
+    memset(keys, 0xEE, sizeof(keys));
+    CHECK(fx_input_state(0, keys, sizeof(keys)) == 0 && keys[KEY_W] == 0 && keys[0] == 0 && keys[255] == 0,
+          "the game sees the keyboard while the menu is open");
+    memset(mouse, 0xEE, sizeof(mouse));
+    CHECK(fx_input_state(1, mouse, sizeof(mouse)) == 0 && mouse[0] == 0 && mouse[4] == 0 && mouse[13] == 0,
+          "the game sees the mouse while the menu is open");
+    count = 4;
+    CHECK(fx_input_events(0, events, sizeof(events[0]), &count, 0) == 0 && count == 0,
+          "the game sees buffered key presses while the menu is open");
+    count = 4;
+    CHECK(fx_input_events(1, events, sizeof(events[0]), &count, 0) == 0 && count == 0,
+          "the game sees buffered mouse events while the menu is open");
+    /* a controller's axes rest at mid-range: zeroing them would be a full deflection */
+    memset(other, 0, sizeof(other));
+    CHECK(fx_input_state(2, other, sizeof(other)) == 0 && other[0] == 0x80 && other[63] == 0x80,
+          "another input device was changed while the menu is open");
+    CHECK(mgr[MODE_ASKED_FOR] == 0, "input meant for the menu switched the game's input mode");
+
+    /* The first frame: nothing to draw on, the menu closes for good. */
+    CHECK(fx_dxgi_open((void *)(ULONG_PTR)0x00FC3001) == 0, "the engine fixture could not create its swap chain");
+    CHECK(fx_dxgi_present() == 0, "Present failed");
+    memset(&st, 0, sizeof(st));
+    CHECK(fx_pad_read(0, &st) == ERROR_SUCCESS && st.buttons == PAD_A && st.right_trigger == 255 && st.lx == 30000,
+          "the gamepad stays held back after the menu has gone");
+    CHECK(key_seen(KEY_W), "the keyboard stays held back after the menu has gone");
+    mouse_move(7, 0);
+    count = 4;
+    CHECK(fx_input_events(1, events, sizeof(events[0]), &count, 0) == 0 && count == 1,
+          "the mouse stays held back after the menu has gone");
+}
+
+/* ---- draw distance: the profile the game gets to read ---------------------------------------
+ * The test driver has put a GamerProfile.xml next to the host and the default
+ * render configuration into the archives of the data folder. */
+
+static long disk_read(const wchar_t *path, char *out, unsigned cap)
+{
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                           OPEN_EXISTING, 0, NULL);
+    DWORD got = 0;
+
+    if (h == INVALID_HANDLE_VALUE) {
+        return -1;
+    }
+    if (!ReadFile(h, out, cap, &got, NULL)) {
+        got = (DWORD)-1;
+    }
+    CloseHandle(h);
+    return (long)got;
+}
+
+static int contains(const char *text, long len, const char *needle)
+{
+    size_t n = strlen(needle);
+    long i;
+    for (i = 0; i + (long)n <= len; ++i) {
+        if (memcmp(text + i, needle, n) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static unsigned temporary_copies(void)
+{
+    wchar_t pattern[MAX_PATH + 64];
+    WIN32_FIND_DATAW found;
+    HANDLE h;
+    unsigned n = 0;
+    DWORD len = GetTempPathW(MAX_PATH, pattern);
+
+    if (!len || len > MAX_PATH) {
+        return 0;
+    }
+    _snwprintf(pattern + len, 60, L"fc3pp-profile-%lu-*.xml", (unsigned long)GetCurrentProcessId());
+    h = FindFirstFileW(pattern, &found);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            ++n;
+        } while (FindNextFileW(h, &found));
+        FindClose(h);
+    }
+    return n;
+}
+
+/* applied: 1 = a preset is selected and the archives hold a render
+ * configuration; 0 = the game must get exactly its file. */
+static void scenario_draw_distance(int applied)
+{
+    static char disk[8192], wide[16384], narrow[16384], other[8192];
+    static const char rewritten[] = "<GamerProfile>\r\n\t<RenderProfile ResolutionX=\"1280\" />\r\n</GamerProfile>\r\n";
+    long disk_len = disk_read(L"GamerProfile.xml", disk, sizeof(disk));
+    long n, m;
+
+    CHECK(disk_len > 100, "the test profile is missing");
+    if (disk_len <= 100) {
+        return;
+    }
+    n = fx_read_file(1, L"GamerProfile.xml", wide, sizeof(wide));
+    m = fx_read_file(0, L".\\GamerProfile.xml", narrow, sizeof(narrow));
+    CHECK(n > 0 && m == n && memcmp(wide, narrow, (size_t)n) == 0,
+          "the two ways of opening the profile give different text (%ld and %ld bytes)", n, m);
+    if (applied) {
+        CHECK(n > disk_len, "the profile the game read has nothing added (%ld bytes, on disk %ld)", n, disk_len);
+        CHECK(contains(wide, n, "<Geometry>") && contains(wide, n, "<Shadow>") && contains(wide, n, "<Terrain>"),
+              "the profile the game read lacks the preset's sections");
+        CHECK(contains(wide, n, "id=\"ultrahigh\" LodScale=\"0.35\" KillLodScale=\"0.35\""),
+              "the level-of-detail scales were not multiplied by 0.7");
+        CHECK(contains(wide, n, "SunShadowRange0=\"4.5\" SunShadowRange1=\"18\" SunShadowRange2=\"90\""),
+              "the shadow ranges were not multiplied by 1.5");
+        CHECK(contains(wide, n, "</Terrain>\r\n</RenderProfile>\r\n\t<NetworkProfile />\r\n</GamerProfile>\r\n"),
+              "the sections are not at the end of the render profile");
+        CHECK(contains(wide, n, "<CustomQuality>") && memcmp(wide, disk, 120) == 0,
+              "what was in the profile is not all there any more");
+    } else {
+        CHECK(n == disk_len && memcmp(wide, disk, (size_t)n) == 0, "the game did not get its profile unchanged");
+    }
+    /* nothing of it is on disk, and no copy is left behind */
+    m = disk_read(L"GamerProfile.xml", other, sizeof(other));
+    CHECK(m == disk_len && memcmp(other, disk, (size_t)m) == 0, "the profile on disk was changed");
+    /* the first time a preset is applied, the profile is copied next to itself */
+    m = disk_read(L"GamerProfile.xml.fc3pp.bak", other, sizeof(other));
+    if (applied) {
+        CHECK(m == disk_len && memcmp(other, disk, (size_t)m) == 0, "no copy of the profile was kept");
+    } else {
+        CHECK(m == -1, "a copy of the profile was made although no preset was applied");
+    }
+    CHECK(temporary_copies() == 0, "%u temporary copies of the profile were left behind", temporary_copies());
+
+    /* other files, also with similar names, are the game's own business */
+    n = fx_read_file(1, L"MyGamerProfile.xml", wide, sizeof(wide));
+    m = disk_read(L"MyGamerProfile.xml", other, sizeof(other));
+    CHECK(n > 0 && n == m && memcmp(wide, other, (size_t)n) == 0, "another file was not read as it is");
+    CHECK(fx_read_file(1, L"no-such-folder\\GamerProfile.xml", wide, sizeof(wide)) == -1 &&
+              fx_read_file(0, L"no-such-folder\\GamerProfile.xml", wide, sizeof(wide)) == -1,
+          "a profile that does not exist could be opened");
+
+    /* The game saves its profile: that goes to the real file, as written. */
+    CHECK(fx_write_file(L"GamerProfile.xml", rewritten, sizeof(rewritten) - 1) == 0, "the profile could not be saved");
+    m = disk_read(L"GamerProfile.xml", other, sizeof(other));
+    CHECK(m == (long)sizeof(rewritten) - 1 && memcmp(other, rewritten, (size_t)m) == 0,
+          "the saved profile is not what the game wrote");
+    /* an open that appends goes to the real file, too */
+    CHECK(fx_append_file(L"GamerProfile.xml", "\r\n", 2) == 0, "the profile could not be appended to");
+    m = disk_read(L"GamerProfile.xml", other, sizeof(other));
+    CHECK(m == (long)sizeof(rewritten) + 1 && memcmp(other, rewritten, sizeof(rewritten) - 1) == 0,
+          "appending did not reach the profile on disk");
+    /* and reading it again starts from what is on disk now */
+    n = fx_read_file(1, L"GamerProfile.xml", wide, sizeof(wide));
+    if (applied) {
+        CHECK(n > m && contains(wide, n, "<RenderProfile ResolutionX=\"1280\" ><Geometry>") &&
+                  contains(wide, n, "</Terrain>\r\n</RenderProfile>\r\n</GamerProfile>\r\n\r\n"),
+              "the saved profile was not read back with the preset");
+        /* the copy is the first profile, not the rewritten one */
+        m = disk_read(L"GamerProfile.xml.fc3pp.bak", other, sizeof(other));
+        CHECK(m == disk_len && memcmp(other, disk, (size_t)m) == 0, "the copy of the profile was overwritten");
+    } else {
+        CHECK(n == m && memcmp(wide, other, (size_t)n) == 0, "the saved profile was not read back as it is");
+    }
+    CHECK(temporary_copies() == 0, "%u temporary copies of the profile were left behind", temporary_copies());
+}
+
 int main(int argc, char **argv)
 {
     const char *scenario = argc > 1 ? argv[1] : "engine";
@@ -920,6 +1332,16 @@ int main(int argc, char **argv)
     } else if (strcmp(scenario, "menu") == 0 || strcmp(scenario, "menu-open") == 0 ||
                strcmp(scenario, "menu-off") == 0) {
         scenario_menu();
+    } else if (strcmp(scenario, "input") == 0) {
+        scenario_input(1);
+    } else if (strcmp(scenario, "input-off") == 0) {
+        scenario_input(0);
+    } else if (strcmp(scenario, "input-held") == 0) {
+        scenario_input_held();
+    } else if (strcmp(scenario, "drawdistance") == 0) {
+        scenario_draw_distance(1);
+    } else if (strcmp(scenario, "drawdistance-off") == 0) {
+        scenario_draw_distance(0);
     } else if (strcmp(scenario, "textures") == 0) {
         scenario_textures(1, 1);
     } else if (strcmp(scenario, "textures-noscan") == 0) {

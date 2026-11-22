@@ -21,6 +21,14 @@ replaced, and no Ubisoft files are included.
 | **Sound library unloaded while in use** (`XAudio2_7.dll_unloaded` crashes) | The library stays loaded |
 | Coarse system timer, "Not responding" window while loading | 1 ms timer requested, ghost window disabled |
 
+Two extras are included but **switched off** until they have been confirmed in play. Turn them on in
+the in-game menu or the INI file:
+
+| Extra | What it does |
+|---|---|
+| **Gamepad or keyboard by use** | The game switches between gamepad mode and keyboard/mouse mode according to what you touch, instead of staying in the mode set in its options |
+| **Draw distance** (*Far*, *Very far*) | Detailed models, trees, terrain and sun shadows are kept up to further away. Costs frame rate. `GamerProfile.xml` is not changed |
+
 How each problem was found and how the fix works is in [TECHNICAL.md](TECHNICAL.md).
 
 The patch does not touch the game's DRM or online services and does not promise a frame-rate gain.
@@ -82,6 +90,8 @@ settings menu. It shows what the patch is doing and writes your changes to the I
 | `[Display] RestoreFullscreenOnFocus` | `1` | Fullscreen after Alt+Tab (DX11) |
 | `[Textures] SkipMismatchedMip0` | `1` | Texture mod crash guard (DX11) |
 | `[Textures] SkipReplacedTextureMip0` | `1` | Keeps the game's original close-up texture from showing through a mod's replacement |
+| `[Controls] AutoSwitchInput` | `0` | `1` = gamepad or keyboard/mouse mode follows what you use |
+| `[Graphics] DrawDistance` | `0` | `1` = far, `2` = very far |
 | `[Menu] Key` | `F8` | The key that opens the in-game menu; `[Menu] Enabled=0` removes the menu |
 | `[General] Enabled` | `1` | `0` turns the whole patch off |
 
@@ -111,6 +121,9 @@ Verified:
   it loads and runs where it crashed before, and the log shows the unfitting levels being left out.
 - The in-game menu draws correctly on a real Direct3D 11 device and leaves the device's state as it
   found it (automated test at 720p and 4K).
+- The two extras as far as they can be without playing: the code they rely on is found in the engine
+  DLLs of both games (DX9 and DX11), the game's render settings are read from the real archives, and
+  both run in a test program against stand-in input devices and a stand-in profile.
 - The test suite passes on Windows, under Wine on Linux, and on an ARM64 machine under Wine with the FEX
   x86 emulator (the arrangement ARM handhelds use).
 
@@ -119,6 +132,9 @@ Not verified:
 - Frame-rate or stutter improvements: not benchmarked.
 - The in-game menu inside the game itself: opening it, the game ignoring the keys meanwhile, overlays
   such as Steam's or Ubisoft Connect's on top of it.
+- **Gamepad or keyboard by use** and **Draw distance** in play. Neither has been tried in the game:
+  whether the game switches cleanly in every screen, and whether it takes the longer distances and
+  what they cost, is not known yet. That is why both are off by default.
 - The texture guard with Blood Dragon or with the DX9 executable (not supported there).
 - `SkipReplacedTextureMip0` in play: it is tested on synthetic archives and finds the expected files in a
   real modded installation, but the result on screen was not yet checked.
@@ -134,7 +150,7 @@ Reports are welcome; please attach the log.
 CMake 3.20+ and either Visual Studio 2022 Build Tools (`.\build.ps1`) or MinGW-w64 i686
 (`cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-i686.cmake && cmake --build build`).
 `ctest --test-dir build` runs the tests, under Wine when cross-compiling. See
-[TECHNICAL.md](TECHNICAL.md#12-tests-and-their-limits) for what they cover.
+[TECHNICAL.md](TECHNICAL.md#14-tests-and-their-limits) for what they cover.
 
 ## License
 

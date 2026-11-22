@@ -25,6 +25,9 @@
 #include <string.h>
 #include <windows.h>
 
+#include "gfx_preset.h"
+#include "gfx_profile.h"
+#include "padmode.h"
 #include "patches.h"
 #include "pe_file.h"
 #include "pe_image.h"
@@ -472,6 +475,50 @@ static void test_engine_module(const wchar_t *dir, const wchar_t *name)
         printf("    input imports: gamepad %s, keyboard and mouse %s\n", pad ? "found" : "MISSING",
                keys ? "found" : "MISSING");
     }
+    if (_wcsicmp(name, L"FC3_d3d11.dll") == 0 || _wcsicmp(name, L"FC3.dll") == 0) {
+        /* Switching between gamepad and keyboard/mouse writes one byte of the
+         * UI manager, which is found through the code that copies the
+         * profile's setting to it. It must point at one variable, in the
+         * module's writable data. */
+        unsigned long pointer = 0;
+        const char *pad_variant = NULL;
+        int found = 0, in_data = 0;
+
+        for (i = 0; i < nsec && i < 32 && found >= 0; ++i) {
+            unsigned long p = 0;
+            int r;
+            if (!(sec[i].characteristics & IMAGE_SCN_MEM_EXECUTE) || !sec[i].size) {
+                continue;
+            }
+            r = pm_find_manager(sec[i].start, sec[i].size, (unsigned long)(ULONG_PTR)sec[i].start, &p, &pad_variant);
+            if (r < 0 || (r > 0 && found && p != pointer)) {
+                found = -1;
+            } else if (r > 0) {
+                pointer = p;
+                found = 1;
+            }
+        }
+        for (i = 0; i < nsec && i < 32 && found == 1; ++i) {
+            const unsigned char *p = (const unsigned char *)(ULONG_PTR)pointer;
+            if ((sec[i].characteristics & IMAGE_SCN_MEM_WRITE) && !(sec[i].characteristics & IMAGE_SCN_MEM_EXECUTE) &&
+                p >= sec[i].start && p + sizeof(void *) <= sec[i].start + sec[i].size) {
+                in_data = 1;
+            }
+        }
+        CHECK(found == 1, "input-mode code: %s", found == 0 ? "not found" : "more than one candidate");
+        CHECK(found != 1 || in_data, "input-mode code: the manager variable is not in the module's writable data");
+        if (found == 1) {
+            printf("    input-mode switch: '%s' variant, UI manager variable at RVA 0x%08lX (%s)\n", pad_variant,
+                   pointer - (unsigned long)(ULONG_PTR)mod, in_data ? "writable data" : "NOT IN DATA");
+        }
+    }
+    if (_wcsicmp(name, L"FC3_d3d11.dll") == 0 || _wcsicmp(name, L"FC3.dll") == 0) {
+        /* The draw-distance presets reach the profile through these two. */
+        int wide = pei_find_import(mod, "kernel32.dll", "CreateFileW") != NULL;
+        int narrow = pei_find_import(mod, "kernel32.dll", "CreateFileA") != NULL;
+        CHECK(wide && narrow, "the engine module does not import CreateFileW and CreateFileA from kernel32.dll");
+        printf("    file-open imports: %s\n", wide && narrow ? "found" : "MISSING");
+    }
     {
         /* The texture guard wraps two methods of the DX11 renderer's texture
          * class, found by signature and through the class's virtual table. */
@@ -612,6 +659,46 @@ static void test_executable(const wchar_t *dir, const wchar_t *name)
     free(buf);
 }
 
+/* The draw-distance presets start from the default render configuration in
+ * the game's archives (a mod's, if the patch archive brings one). It must be
+ * readable, hold the three sections with numbers in them, and fit into a
+ * profile of the form the game writes. */
+static void test_render_config(const wchar_t *data_dir)
+{
+    static const char *const sections[] = {"Geometry", "Shadow", "Terrain"};
+    static const char profile[] = "<GamerProfile>\r\n\t<RenderProfile MSAALevel=\"0\">\r\n\t\t<CustomQuality>"
+                                  "<quality GeometryQuality=\"ultrahigh\" /></CustomQuality>\r\n\t</RenderProfile>\r\n"
+                                  "</GamerProfile>\r\n";
+    size_t len = 0, cap;
+    char *config = gfx_profile_read_default_config(data_dir, &len);
+    char *out;
+    unsigned values[3] = {0, 0, 0}, added = 0, s;
+    long n;
+
+    CHECK(config != NULL, "the default render configuration could not be read from the archives");
+    if (!config) {
+        return;
+    }
+    cap = sizeof(profile) + len + GP_OVERLAY_SLACK;
+    out = (char *)malloc(cap);
+    if (!out) {
+        free(config);
+        return;
+    }
+    for (s = 0; s < 3; ++s) {
+        n = gp_scaled_section(config, len, sections[s], GP_VERY_FAR, out, cap, &values[s]);
+        CHECK(n > 0 && values[s] > 0, "render configuration: the %s section has no distance values to scale",
+              sections[s]);
+    }
+    n = gp_overlay(profile, sizeof(profile) - 1, config, len, GP_FAR, out, cap, &added);
+    CHECK(n > (long)sizeof(profile) && added == 3, "render configuration: %u of 3 sections fit into a profile", added);
+    printf("    default render configuration: %lu bytes; distance values to scale: %u in Geometry, %u in Shadow, "
+           "%u in Terrain\n",
+           (unsigned long)len, values[0], values[1], values[2]);
+    free(out);
+    free(config);
+}
+
 /* The scan for top mip level files that belong to textures a mod has replaced,
  * on the game's real archives. What it finds depends on the mods installed,
  * so this checks that the archives are understood and the numbers add up. */
@@ -643,6 +730,7 @@ static void test_archives(const wchar_t *bin_dir)
            "    of the wrong size, %u are the game's own files, %u replace a texture whose original top level\n"
            "    still fits (%ld files to leave out)\n",
            stats.own_top, stats.missing, stats.unfit, stats.unchanged, stats.stale, count);
+    test_render_config(data_dir);
 }
 
 static void test_directory(const wchar_t *dir)
