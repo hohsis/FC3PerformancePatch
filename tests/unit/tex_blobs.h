@@ -136,4 +136,72 @@
     0xA4, 0x52, 0x50, 0xFF, 0x51, 0x28, 0x33, 0xD2, 0x42, 0x39, 0x55, 0xAC, 0x0F, 0x84, 0x6B, 0x01, 0x00, 0x00, \
     0x8B, 0x45, 0xA4, 0x83, 0xF8, 0x08, 0xC3
 
+/* ---- the "top level resource" class (tex_link.h) -----------------------------------
+ * Stand-ins for its Load and Unload methods. Each starts with the instructions
+ * the patch recognises and then follows the link to the texture the way the
+ * real method does, so that a link to a texture that is gone crashes here as
+ * it does in the game.
+ *
+ *   resource:  +04h  calls that reached Load     +08h  calls that reached Unload
+ *              +20h  file name (64 bit)          +28h  size, cleared by Unload
+ *              +30h  linked texture              +34h  valid
+ *   texture:   +28h  top levels added            +30h  record     +48h  users
+ *   record:    +20h  counter, decremented when a top level is dropped
+ */
+
+/* bool __thiscall Load(const void *file, unsigned size): al = 0 "added". */
+#define TOP_BLOB_LOAD                                                                                       \
+    0x55,                                           /* 00 push ebp                         */               \
+    0x8B, 0xEC,                                     /* 01 mov  ebp, esp                    */               \
+    0x83, 0xEC, 0x2C,                               /* 03 sub  esp, 2Ch                    */               \
+    0x56,                                           /* 06 push esi                         */               \
+    0x57,                                           /* 07 push edi                         */               \
+    0x8B, 0x7D, 0x0C,                               /* 08 mov  edi, [ebp+0Ch]    ; size    */               \
+    0x8B, 0xF1,                                     /* 0B mov  esi, ecx          ; this    */               \
+    0x8B, 0x4D, 0x08,                               /* 0D mov  ecx, [ebp+8]      ; file    */               \
+    0x57,                                           /* 10 push edi                         */               \
+    0x8D, 0x45, 0xD4,                               /* 11 lea  eax, [ebp-2Ch]              */               \
+    /* ---- end of the recognised part ---- */                                                              \
+    0x83, 0xC4, 0x04,                               /* 14 add  esp, 4                      */               \
+    0xFF, 0x46, 0x04,                               /* 17 inc  dword [esi+4]     ; calls   */               \
+    0x8B, 0x46, 0x30,                               /* 1A mov  eax, [esi+30h]    ; texture */               \
+    0xFF, 0x40, 0x28,                               /* 1D inc  dword [eax+28h]   ; added   */               \
+    0x32, 0xC0,                                     /* 20 xor  al, al                      */               \
+    0x5F,                                           /* 22 pop  edi                         */               \
+    0x5E,                                           /* 23 pop  esi                         */               \
+    0x8B, 0xE5,                                     /* 24 mov  esp, ebp                    */               \
+    0x5D,                                           /* 26 pop  ebp                         */               \
+    0xC2, 0x08, 0x00                                /* 27 ret  8                           */
+
+#define TOP_BLOB_LOAD_SIZE 0x2A
+
+/* void __thiscall Unload(void). */
+#define TOP_BLOB_UNLOAD                                                                                     \
+    0x55,                                           /* 00 push ebp                         */               \
+    0x8B, 0xEC,                                     /* 01 mov  ebp, esp                    */               \
+    0x51,                                           /* 03 push ecx                         */               \
+    0x80, 0x79, 0x34, 0x00,                         /* 04 cmp  byte [ecx+34h], 0 ; valid?  */               \
+    0x89, 0x4D, 0xFC,                               /* 08 mov  [ebp-4], ecx                */               \
+    0x74, 0x24,                                     /* 0B je   out                         */               \
+    0x53,                                           /* 0D push ebx                         */               \
+    0x8B, 0x59, 0x30,                               /* 0E mov  ebx, [ecx+30h]    ; texture */               \
+    0x83, 0x7B, 0x48, 0x01,                         /* 11 cmp  dword [ebx+48h], 1 ; users  */               \
+    0x77, 0x0C,                                     /* 15 ja   done                        */               \
+    0x56,                                           /* 17 push esi                         */               \
+    0x8B, 0x73, 0x30,                               /* 18 mov  esi, [ebx+30h]    ; record  */               \
+    0x85, 0xF6,                                     /* 1B test esi, esi                    */               \
+    0x74, 0x03,                                     /* 1D je   none                        */               \
+    /* ---- end of the recognised part ---- */                                                              \
+    0xFF, 0x4E, 0x20,                               /* 1F dec  dword [esi+20h]   ; "Drop"  */               \
+    0x5E,                                           /* 22 pop  esi               <none     */               \
+    0x8B, 0x4D, 0xFC,                               /* 23 mov  ecx, [ebp-4]      <done     */               \
+    0xFF, 0x41, 0x08,                               /* 26 inc  dword [ecx+8]     ; calls   */               \
+    0xC7, 0x41, 0x28, 0x00, 0x00, 0x00, 0x00,       /* 29 mov  dword [ecx+28h], 0          */               \
+    0x5B,                                           /* 30 pop  ebx                         */               \
+    0x8B, 0xE5,                                     /* 31 mov  esp, ebp          <out      */               \
+    0x5D,                                           /* 33 pop  ebp                         */               \
+    0xC3                                            /* 34 ret                              */
+
+#define TOP_BLOB_UNLOAD_SIZE 0x35
+
 #endif /* FC3PP_TEX_BLOBS_H */

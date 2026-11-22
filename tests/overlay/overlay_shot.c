@@ -30,6 +30,7 @@
 #include <windows.h>
 
 #include "config.h"
+#include "log.h"
 #include "menu.h"
 
 static const GUID IID_Tex2D = {0x6f15aaf2, 0xd208, 0x4e89, {0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}};
@@ -272,6 +273,7 @@ int main(int argc, char **argv)
     }
 
     /* The menu, as it runs in the game: built from the configuration, opened, drawn at Present. */
+    log_init(L"fc3pp_overlay_shot.log", LOG_DEBUG);
     config_defaults(&cfg);
     cfg.menu_open_at_start = 1;
     cfg.input_without_focus = 1; /* a test program is never the foreground window */
@@ -285,6 +287,19 @@ int main(int argc, char **argv)
         menu_on_present(chain);
     }
     CHECK(menu_is_open(), "the menu closed itself: it could not draw");
+    if (!menu_is_open()) {
+        /* the patch says why in its log */
+        char line[400];
+        FILE *f;
+        log_shutdown();
+        f = fopen("fc3pp_overlay_shot.log", "r");
+        while (f && fgets(line, sizeof(line), f)) {
+            printf("    log: %s", line);
+        }
+        if (f) {
+            fclose(f);
+        }
+    }
 
     /* State: exactly as the "game" left it. */
     ID3D11DeviceContext_OMGetRenderTargets(context, 1, &target_after, NULL);

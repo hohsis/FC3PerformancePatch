@@ -34,6 +34,9 @@ add_test(NAME menu_rendering COMMAND fc3pp_overlay_shot --pad "$<TARGET_FILE:fx_
 add_test(NAME menu_rendering_large
     COMMAND fc3pp_overlay_shot --scale 200 "${CMAKE_BINARY_DIR}/menu_large.bmp" 1280 800)
 set_tests_properties(menu_rendering menu_rendering_large PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+# Under Wine the stand-in must win over Wine's own xinput1_3.dll.
+set_tests_properties(menu_rendering PROPERTIES
+    ENVIRONMENT "WINEDLLOVERRIDES=xinput1_3=n,b\;mscoree=\;mshtml=")
 
 # ---- runtime smoke tests: the proxy inside a 32-bit host -------------------------
 # Everything lands in one folder so the host finds its fixtures.

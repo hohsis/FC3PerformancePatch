@@ -2,9 +2,11 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include <stdlib.h>
+#include <windows.h>
 
 #include "test.h"
 #include "tex_blobs.h"
+#include "tex_link.h"
 #include "tex_rule.h"
 
 #define DXGI_R8G8B8A8_UNORM 28u
@@ -400,6 +402,115 @@ static void test_destructor(void)
     CHECK(!tex_is_destructor(NULL, 64));
 }
 
+/* ---- the top level resource class ---------------------------------------------------- */
+
+static void test_top_level_methods(void)
+{
+    static const unsigned char load[] = {TOP_BLOB_LOAD};
+    static const unsigned char unload[] = {TOP_BLOB_UNLOAD};
+    static unsigned char text[2048], data[256];
+    tl_site site;
+    unsigned long slot = 0;
+
+    CHECK_EQ_U(sizeof(load), TOP_BLOB_LOAD_SIZE);
+    CHECK_EQ_U(sizeof(unload), TOP_BLOB_UNLOAD_SIZE);
+
+    memset(text, 0xCC, sizeof(text));
+    memset(&site, 0, sizeof(site));
+    CHECK(tl_find_methods(text, sizeof(text), 0x10001000ul, &site) == 0);
+    memcpy(text + 0x100, unload, sizeof(unload));
+    CHECK(tl_find_methods(text, sizeof(text), 0x10001000ul, &site) == -1); /* one without the other */
+    memcpy(text + 0x400, load, sizeof(load));
+    CHECK(tl_find_methods(text, sizeof(text), 0x10001000ul, &site) == 1);
+    CHECK_EQ_U(site.load, 0x10001400ul);
+    CHECK_EQ_U(site.unload, 0x10001100ul);
+    CHECK_STR(site.variant, "release");
+
+    /* the jump distances are not part of what is recognised */
+    text[0x100 + 0x0C] = 0x3F;
+    text[0x100 + 0x16] = 0x2D;
+    text[0x100 + 0x1E] = 0x24;
+    CHECK(tl_find_methods(text, sizeof(text), 0x10001000ul, &site) == 1);
+    /* another offset in the object is another method */
+    text[0x100 + 6] = 0x38;
+    CHECK(tl_find_methods(text, sizeof(text), 0x10001000ul, &site) == -1);
+    text[0x100 + 6] = 0x34;
+    /* two candidates: refuse to guess */
+    memcpy(text + 0x600, load, sizeof(load));
+    CHECK(tl_find_methods(text, sizeof(text), 0x10001000ul, &site) == -1);
+    memset(text + 0x600, 0xCC, sizeof(load));
+    CHECK(tl_find_methods(text, sizeof(text), 0x10001000ul, &site) == 1);
+    CHECK(tl_find_methods(NULL, 16, 0, &site) == 0);
+    CHECK(tl_find_methods(text, sizeof(text), 0, NULL) == 0);
+
+    /* the class's table: Load directly followed by Unload */
+    memset(data, 0, sizeof(data));
+    CHECK_EQ_U(tl_find_slots(data, sizeof(data), 0x10200000ul, &site, &slot), 0);
+    data[0x68] = 0x00, data[0x69] = 0x14, data[0x6A] = 0x00, data[0x6B] = 0x10; /* Load   */
+    data[0x6C] = 0x00, data[0x6D] = 0x11, data[0x6E] = 0x00, data[0x6F] = 0x10; /* Unload */
+    CHECK_EQ_U(tl_find_slots(data, sizeof(data), 0x10200000ul, &site, &slot), 1);
+    CHECK_EQ_U(slot, 0x10200068ul);
+    /* the two the other way round, or not on a pointer boundary, are something else */
+    data[0x80] = 0x00, data[0x81] = 0x11, data[0x82] = 0x00, data[0x83] = 0x10;
+    data[0x84] = 0x00, data[0x85] = 0x14, data[0x86] = 0x00, data[0x87] = 0x10;
+    CHECK_EQ_U(tl_find_slots(data, sizeof(data), 0x10200000ul, &site, &slot), 1);
+    CHECK_EQ_U(tl_find_slots(data + 1, sizeof(data) - 1, 0x10200001ul, &site, &slot), 1);
+    CHECK_EQ_U(slot, 0x10200068ul);
+    /* a second table holding the pair makes it two */
+    memcpy(data + 0xA0, data + 0x68, 8);
+    CHECK_EQ_U(tl_find_slots(data, sizeof(data), 0x10200000ul, &site, &slot), 2);
+    CHECK_EQ_U(slot, 0x10200068ul);
+    CHECK_EQ_U(tl_find_slots(NULL, 8, 0, &site, &slot), 0);
+}
+
+/* The stand-ins behave like the methods they stand in for: this is what the
+ * runtime tests and the fixture rely on. */
+typedef unsigned char(__fastcall *top_load_fn)(void *self, void *unused, const void *file, unsigned size);
+typedef void(__fastcall *top_unload_fn)(void *self, void *unused);
+
+static void test_top_level_blobs(void)
+{
+    static const unsigned char load[] = {TOP_BLOB_LOAD};
+    static const unsigned char unload[] = {TOP_BLOB_UNLOAD};
+    unsigned char *code = (unsigned char *)VirtualAlloc(NULL, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    unsigned long resource[16], texture[24], record[12];
+
+    CHECK(code != NULL);
+    if (!code) {
+        return;
+    }
+    memcpy(code, load, sizeof(load));
+    memcpy(code + 128, unload, sizeof(unload));
+    memset(resource, 0, sizeof(resource));
+    memset(texture, 0, sizeof(texture));
+    memset(record, 0, sizeof(record));
+    resource[0x30 / 4] = (unsigned long)(size_t)texture;
+    resource[0x34 / 4] = 1;
+    resource[0x28 / 4] = 77;
+    texture[0x30 / 4] = (unsigned long)(size_t)record;
+    texture[0x48 / 4] = 1;
+    record[0x20 / 4] = 5;
+
+    CHECK(((top_load_fn)(void *)code)(resource, NULL, "file", 4) == 0);
+    CHECK_EQ_U(resource[1], 1);
+    CHECK_EQ_U(texture[0x28 / 4], 1);
+    ((top_unload_fn)(void *)(code + 128))(resource, NULL);
+    CHECK_EQ_U(resource[2], 1);
+    CHECK_EQ_U(record[0x20 / 4], 4);
+    CHECK_EQ_U(resource[0x28 / 4], 0);
+    /* two users: the record is left alone */
+    texture[0x48 / 4] = 2;
+    ((top_unload_fn)(void *)(code + 128))(resource, NULL);
+    CHECK_EQ_U(resource[2], 2);
+    CHECK_EQ_U(record[0x20 / 4], 4);
+    /* not valid: nothing at all */
+    resource[0x34 / 4] = 0;
+    resource[0x30 / 4] = 0;
+    ((top_unload_fn)(void *)(code + 128))(resource, NULL);
+    CHECK_EQ_U(resource[2], 2);
+    VirtualFree(code, 0, MEM_RELEASE);
+}
+
 void suite_tex_rule(void)
 {
     RUN(test_destructor);
@@ -411,4 +522,6 @@ void suite_tex_rule(void)
     RUN(test_skip_full);
     RUN(test_find_methods);
     RUN(test_find_slots);
+    RUN(test_top_level_methods);
+    RUN(test_top_level_blobs);
 }

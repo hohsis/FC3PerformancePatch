@@ -42,6 +42,10 @@ __declspec(dllimport) int fx_tex_drop(void *texture);
 __declspec(dllimport) void fx_tex_destroy(void *texture);
 __declspec(dllimport) void fx_tex_fail_next_add(void *texture, int fail);
 __declspec(dllimport) void fx_tex_state(void *texture, unsigned out[6]);
+__declspec(dllimport) void *fx_top_create(unsigned index, unsigned name_low, unsigned name_high, int link);
+__declspec(dllimport) int fx_top_load(void *resource, const void *file, unsigned size);
+__declspec(dllimport) void fx_top_unload(void *resource);
+__declspec(dllimport) void fx_top_state(unsigned index, long out[5]);
 __declspec(dllimport) unsigned long fx_pad_read(unsigned index, void *state);
 __declspec(dllimport) int fx_input_open(void);
 __declspec(dllimport) long fx_input_state(unsigned device, void *data, unsigned size);
@@ -1302,6 +1306,111 @@ static void scenario_draw_distance(int applied)
     CHECK(temporary_copies() == 0, "%u temporary copies of the profile were left behind", temporary_copies());
 }
 
+/* ---- top level files that several textures name ---------------------------------------
+ * The test driver has built archives in which two textures of the "mod" name
+ * the top level file tex\boar_d_mip0.xbt, and left that file (shared_top.xbt)
+ * and an ordinary one (fresh_top.xbt) next to the host. The engine fixture's
+ * top level resources follow their link to a texture as the game's do: one
+ * whose texture is gone crashes the process unless the patch keeps the engine
+ * away from it. */
+
+static unsigned long long file_name_hash(const char *path)
+{
+    unsigned long long crc = 0;
+    int bit;
+
+    for (; *path; ++path) {
+        unsigned char c = (unsigned char)*path;
+        if (c >= 'A' && c <= 'Z') {
+            c = (unsigned char)(c + 32);
+        }
+        crc ^= c;
+        for (bit = 0; bit < 8; ++bit) {
+            crc = (crc & 1) ? (crc >> 1) ^ 0xD800000000000000ull : crc >> 1;
+        }
+    }
+    return crc;
+}
+
+enum { TOP_LOADS, TOP_UNLOADS, TOP_ADDED, TOP_COUNTER, TOP_SIZE };
+
+/* handled: 1 = the patch keeps shared files away from the engine. */
+static void scenario_shared_tops(int handled)
+{
+    static unsigned char shared_file[4096], fresh_file[4096];
+    unsigned long long shared_name = file_name_hash("tex\\boar_d_mip0.xbt");
+    unsigned long long fresh_name = file_name_hash("tex\\rock_d_mip0.xbt");
+    unsigned shared_size = read_local_file("shared_top.xbt", shared_file, sizeof(shared_file));
+    unsigned fresh_size = read_local_file("fresh_top.xbt", fresh_file, sizeof(fresh_file));
+    void *top;
+    long st[5];
+
+    CHECK(shared_size > 160 && fresh_size > 160, "the test driver did not provide the top level files");
+    if (shared_size <= 160 || fresh_size <= 160) {
+        return;
+    }
+    Sleep(300); /* the patch reads the archives in the background */
+
+    /* An ordinary top level file: loaded and unloaded by the engine as always. */
+    top = fx_top_create(0, (unsigned)fresh_name, (unsigned)(fresh_name >> 32), 0);
+    CHECK(fx_top_load(top, fresh_file, (unsigned)fresh_size) == 0, "an ordinary top level file was not loaded");
+    fx_top_state(0, st);
+    CHECK(st[TOP_LOADS] == 1 && st[TOP_ADDED] == 1, "an ordinary top level did not reach the engine");
+    fx_top_unload(top);
+    fx_top_state(0, st);
+    CHECK(st[TOP_UNLOADS] == 1 && st[TOP_COUNTER] == 99 && st[TOP_SIZE] == 0,
+          "an ordinary top level was not unloaded by the engine (%ld unloads, counter %ld)", st[TOP_UNLOADS],
+          st[TOP_COUNTER]);
+    if (!handled) {
+        return; /* without the patch the rest is the crash */
+    }
+
+    /* A file two textures name, recognised by its name. The texture it is
+     * linked to has been destroyed: following the link is the crash. */
+    top = fx_top_create(1, (unsigned)shared_name, (unsigned)(shared_name >> 32), 1);
+    CHECK(fx_top_load(top, shared_file, (unsigned)shared_size) == 1, "a shared top level file was loaded");
+    fx_top_unload(top);
+    fx_top_state(1, st);
+    CHECK(st[TOP_LOADS] == 0 && st[TOP_UNLOADS] == 0 && st[TOP_SIZE] == 4096,
+          "the engine's methods ran for a shared top level file (%ld loads, %ld unloads)", st[TOP_LOADS],
+          st[TOP_UNLOADS]);
+    /* unloading without a load before (the engine releases what it never used) */
+    top = fx_top_create(1, (unsigned)shared_name, (unsigned)(shared_name >> 32), 1);
+    fx_top_unload(top);
+    fx_top_state(1, st);
+    CHECK(st[TOP_UNLOADS] == 0, "a shared top level file that was never loaded reached the engine's Unload");
+
+    /* The same file under a name the patch does not know: recognised by its content. */
+    top = fx_top_create(2, 0x11111111u, 0x22222222u, 1);
+    CHECK(fx_top_load(top, shared_file, (unsigned)shared_size) == 1, "a shared top level file was loaded (by content)");
+    fx_top_unload(top);
+    fx_top_state(2, st);
+    CHECK(st[TOP_LOADS] == 0 && st[TOP_UNLOADS] == 0, "the engine's methods ran for a shared file known by content");
+    /* The engine reuses the address for another resource: that one is ordinary again. */
+    top = fx_top_create(2, 0x11111111u, 0x22222222u, 0);
+    CHECK(fx_top_load(top, shared_file, (unsigned)shared_size) == 1, "the shared file was loaded the second time");
+    top = fx_top_create(2, 0x33333333u, 0x44444444u, 0);
+    CHECK(fx_top_load(top, fresh_file, (unsigned)fresh_size) == 0, "an ordinary file at a reused address was refused");
+    fx_top_unload(top);
+    fx_top_state(2, st);
+    CHECK(st[TOP_LOADS] == 1 && st[TOP_UNLOADS] == 1 && st[TOP_COUNTER] == 99,
+          "an ordinary file at a reused address did not reach the engine (%ld loads, %ld unloads)", st[TOP_LOADS],
+          st[TOP_UNLOADS]);
+
+    /* The last line of defence: an ordinary file whose texture, or whose
+     * texture's record, is gone when it is unloaded. */
+    top = fx_top_create(3, (unsigned)fresh_name, (unsigned)(fresh_name >> 32), 2);
+    fx_top_unload(top);
+    fx_top_state(3, st);
+    CHECK(st[TOP_UNLOADS] == 0 && st[TOP_SIZE] == 0, "unloading for a texture whose record is gone: %ld unloads, size %ld",
+          st[TOP_UNLOADS], st[TOP_SIZE]);
+    top = fx_top_create(3, (unsigned)fresh_name, (unsigned)(fresh_name >> 32), 1);
+    fx_top_unload(top);
+    fx_top_state(3, st);
+    CHECK(st[TOP_UNLOADS] == 0 && st[TOP_SIZE] == 0, "unloading for a texture that is gone: %ld unloads, size %ld",
+          st[TOP_UNLOADS], st[TOP_SIZE]);
+}
+
 int main(int argc, char **argv)
 {
     const char *scenario = argc > 1 ? argv[1] : "engine";
@@ -1359,6 +1468,10 @@ int main(int argc, char **argv)
         scenario_draw_distance(1);
     } else if (strcmp(scenario, "drawdistance-off") == 0) {
         scenario_draw_distance(0);
+    } else if (strcmp(scenario, "shared-tops") == 0) {
+        scenario_shared_tops(1);
+    } else if (strcmp(scenario, "shared-tops-off") == 0) {
+        scenario_shared_tops(0);
     } else if (strcmp(scenario, "textures") == 0) {
         scenario_textures(1, 1);
     } else if (strcmp(scenario, "textures-noscan") == 0) {

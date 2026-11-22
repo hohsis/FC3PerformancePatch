@@ -18,6 +18,10 @@ default to on, the two extras to off. Copy the new INI too if you want them list
   leaves out only the levels that do not fit (`[Textures] SkipMismatchedMip0`), and the original
   close-up textures of textures a mod has repainted, which would otherwise show through a few metres
   ahead of you (`[Textures] SkipReplacedTextureMip0`).
+- **A late crash with texture mods is fixed (Far Cry 3).** Some mods make several textures name the
+  same close-up texture file. The game links such a file to one texture only and, hours into a
+  session, unloads it through a texture that no longer exists: a write into freed memory. The patch
+  finds these files at start-up and does not load them (`[Textures] SkipSharedMip0`).
 - **A settings menu in the game (DX11).** F8, or both thumbsticks held in on a gamepad, opens a menu
   drawn by the patch: what it is doing, and its settings, which are saved to the INI file. The game
   does not see the keys used in it. `[Menu] Key` changes the key, `[Menu] Enabled=0` removes it.

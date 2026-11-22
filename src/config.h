@@ -42,6 +42,7 @@ typedef struct fc3pp_config {
     /* [Textures] */
     int texture_guard; /* leave out top mip levels that do not fit their texture (DX11) */
     int texture_scan;  /* ... and those made for a texture a mod has replaced */
+    int texture_shared; /* do not load top mip level files that several textures name */
 
     /* [Menu] */
     int menu_enabled;       /* the in-game settings menu (DX11) */

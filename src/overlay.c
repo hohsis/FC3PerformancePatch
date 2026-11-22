@@ -7,8 +7,8 @@
  *
  * The font is rendered once with GDI into a one-channel texture: the system's
  * UI font where there is one (Windows), whatever Wine substitutes otherwise.
- * The two small shaders are compiled at run time with the D3D compiler DLL
- * the game itself requires.
+ * The two small shaders are compiled ahead of time and part of this DLL
+ * (menu_shaders.h), so no shader compiler is needed where the game runs.
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #define COBJMACROS
@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "log.h"
+#include "menu_shaders.h"
 
 #define MAX_VERTICES 24576u /* 4096 rectangles */
 #define ATLAS_WIDTH 1024
@@ -38,18 +39,6 @@ typedef struct gpu_vertex {
     float x, y, u, v;
     unsigned long color;
 } gpu_vertex;
-
-static const char SHADER_SOURCE[] =
-    "struct VI { float2 p : POSITION; float2 uv : TEXCOORD0; float4 c : COLOR0; };\n"
-    "struct PI { float4 p : SV_POSITION; float2 uv : TEXCOORD0; float4 c : COLOR0; };\n"
-    "Texture2D font_texture : register(t0);\n"
-    "SamplerState font_sampler : register(s0);\n"
-    "PI vs_main(VI i) { PI o; o.p = float4(i.p, 0.0, 1.0); o.uv = i.uv; o.c = i.c; return o; }\n"
-    "float4 ps_main(PI i) : SV_Target { return float4(i.c.rgb, i.c.a * font_texture.Sample(font_sampler, i.uv).r); }\n";
-
-typedef HRESULT(WINAPI *compile_fn)(const void *src, SIZE_T len, const char *name, const void *defines, void *include,
-                                    const char *entry, const char *target, UINT flags1, UINT flags2, ID3DBlob **code,
-                                    ID3DBlob **errors);
 
 static struct {
     ID3D11Device *device;
@@ -112,25 +101,6 @@ static int fail(const char *what, HRESULT hr)
     return 0;
 }
 
-static compile_fn find_compiler(void)
-{
-    static const char *const names[] = {"d3dcompiler_47.dll", "d3dcompiler_43.dll", "d3dcompiler_46.dll"};
-    unsigned i;
-
-    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
-        HMODULE mod = LoadLibraryA(names[i]);
-        if (mod) {
-            FARPROC p = GetProcAddress(mod, "D3DCompile");
-            if (p) {
-                compile_fn fn;
-                memcpy(&fn, &p, sizeof(p));
-                return fn;
-            }
-        }
-    }
-    return NULL;
-}
-
 static int create_pipeline(void)
 {
     static const D3D11_INPUT_ELEMENT_DESC elements[] = {
@@ -138,8 +108,6 @@ static int create_pipeline(void)
         {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0},
         {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
     };
-    compile_fn compile = find_compiler();
-    ID3DBlob *vs_code = NULL, *ps_code = NULL;
     D3D11_BUFFER_DESC buffer;
     D3D11_BLEND_DESC blend;
     D3D11_RASTERIZER_DESC raster;
@@ -147,29 +115,16 @@ static int create_pipeline(void)
     D3D11_SAMPLER_DESC sampler;
     HRESULT hr;
 
-    if (!compile) {
-        return fail("the Direct3D shader compiler DLL was not found", E_FAIL);
-    }
-    hr = compile(SHADER_SOURCE, sizeof(SHADER_SOURCE) - 1, "fc3pp_menu", NULL, NULL, "vs_main", "vs_4_0", 0, 0, &vs_code,
-                 NULL);
+    /* The shaders are part of this DLL as compiled code (menu_shaders.h): the
+     * game brings no shader compiler along, and under Wine there may be none
+     * that loads. */
+    hr = ID3D11Device_CreateVertexShader(g.device, MENU_VS_CODE, sizeof(MENU_VS_CODE), NULL, &g.vs);
     if (SUCCEEDED(hr)) {
-        hr = compile(SHADER_SOURCE, sizeof(SHADER_SOURCE) - 1, "fc3pp_menu", NULL, NULL, "ps_main", "ps_4_0", 0, 0,
-                     &ps_code, NULL);
+        hr = ID3D11Device_CreatePixelShader(g.device, MENU_PS_CODE, sizeof(MENU_PS_CODE), NULL, &g.ps);
     }
     if (SUCCEEDED(hr)) {
-        hr = ID3D11Device_CreateVertexShader(g.device, ID3D10Blob_GetBufferPointer(vs_code),
-                                             ID3D10Blob_GetBufferSize(vs_code), NULL, &g.vs);
+        hr = ID3D11Device_CreateInputLayout(g.device, elements, 3, MENU_VS_CODE, sizeof(MENU_VS_CODE), &g.layout);
     }
-    if (SUCCEEDED(hr)) {
-        hr = ID3D11Device_CreatePixelShader(g.device, ID3D10Blob_GetBufferPointer(ps_code),
-                                            ID3D10Blob_GetBufferSize(ps_code), NULL, &g.ps);
-    }
-    if (SUCCEEDED(hr)) {
-        hr = ID3D11Device_CreateInputLayout(g.device, elements, 3, ID3D10Blob_GetBufferPointer(vs_code),
-                                            ID3D10Blob_GetBufferSize(vs_code), &g.layout);
-    }
-    RELEASE(vs_code);
-    RELEASE(ps_code);
     if (FAILED(hr)) {
         return fail("the menu's shaders could not be created", hr);
     }

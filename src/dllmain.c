@@ -28,6 +28,7 @@
 #include "pe_image.h"
 #include "proxy.h"
 #include "texguard.h"
+#include "texlink.h"
 
 #define MAX_TRACKED_MODULES 8
 #define MAX_INI_SIZE (1u << 20)
@@ -292,6 +293,9 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
         hooks += menu_install_hooks(mod);
         hooks += gfx_profile_install(mod, g_cfg.draw_distance);
         hooks += audio_install(mod, &g_cfg);
+        if (g_cfg.texture_shared) {
+            texlink_install(mod, name); /* first: it tells the archive scan */
+        }
         if (g_cfg.texture_guard) {
             texguard_install(mod, name, g_cfg.texture_scan);
         }
@@ -509,6 +513,7 @@ static void fc3pp_shutdown(int process_terminating)
         shim_log_stats();
         audio_log_stats();
         texguard_log_stats();
+        texlink_log_stats();
         padswitch_log_stats();
         gfx_profile_log_stats();
         LOGI("process exit");
@@ -521,6 +526,7 @@ static void fc3pp_shutdown(int process_terminating)
     shim_log_stats();
     audio_log_stats();
     texguard_log_stats();
+    texlink_log_stats();
     padswitch_log_stats();
     gfx_profile_log_stats();
     LOGI("unloaded");

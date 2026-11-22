@@ -27,6 +27,11 @@ static unsigned g_archive_count;
 
 static unsigned long long g_stale[MAX_STALE];
 static volatile LONG g_stale_count; /* valid once g_done is signalled */
+#define MAX_SHARED 1024
+static unsigned long long g_shared_names[MAX_SHARED];   /* top level files several textures name */
+static unsigned long long g_shared_ids[MAX_SHARED * 2]; /* the same files by content */
+static volatile LONG g_shared_name_count, g_shared_id_count;
+static volatile LONG g_shared_handled;
 static HANDLE g_done;
 static volatile LONG g_started;
 static volatile LONG g_waited;
@@ -146,40 +151,76 @@ static void add_game_archives(const wchar_t *dir, const wchar_t *override_path, 
     FindClose(find);
 }
 
-long tex_stale_scan_folder(const wchar_t *data_dir, unsigned long long *ids, size_t cap, ts_stats *stats,
-                           unsigned *archives)
+/* Opens the archives of data_dir. Returns 1 when there is an override archive. */
+static int open_archives(const wchar_t *data_dir, ts_input *input)
 {
     wchar_t override_path[PATH_CHARS];
-    ts_input input;
-    ts_stats local;
-    long count = 0;
+
+    g_archive_count = 0;
+    if (!data_dir || !join(override_path, data_dir, L"patch.fat")) {
+        return 0;
+    }
+    add_archive(override_path);
+    if (g_archive_count != 1) {
+        return 0;
+    }
+    add_game_archives(data_dir, override_path, 0);
+    input->fats = g_fats;
+    input->count = g_archive_count;
+    input->read = read_data;
+    input->ctx = NULL;
+    return 1;
+}
+
+static void close_archives(void)
+{
     unsigned i;
 
-    if (!stats) {
-        stats = &local;
-    }
-    memset(stats, 0, sizeof(*stats));
-    g_archive_count = 0;
-    if (data_dir && join(override_path, data_dir, L"patch.fat")) {
-        add_archive(override_path);
-        if (g_archive_count == 1) {
-            add_game_archives(data_dir, override_path, 0);
-            input.fats = g_fats;
-            input.count = g_archive_count;
-            input.read = read_data;
-            input.ctx = NULL;
-            count = tex_scan_stale(&input, ids, cap, stats);
-        }
-    }
-    if (archives) {
-        *archives = g_archive_count;
-    }
     for (i = 0; i < g_archive_count; ++i) {
         CloseHandle(g_archives[i].data);
         free(g_archives[i].index);
         g_archives[i].index = NULL;
     }
     g_archive_count = 0;
+}
+
+long tex_stale_scan_folder(const wchar_t *data_dir, unsigned long long *ids, size_t cap, ts_stats *stats,
+                           unsigned *archives)
+{
+    ts_input input;
+    ts_stats local;
+    long count = 0;
+
+    if (!stats) {
+        stats = &local;
+    }
+    memset(stats, 0, sizeof(*stats));
+    if (open_archives(data_dir, &input)) {
+        count = tex_scan_stale(&input, ids, cap, stats);
+    }
+    if (archives) {
+        *archives = g_archive_count;
+    }
+    close_archives();
+    return count;
+}
+
+long tex_stale_scan_folder_shared(const wchar_t *data_dir, unsigned long long *names, size_t name_cap,
+                                  unsigned long long *ids, size_t id_cap, size_t *id_count, ts_shared_stats *stats)
+{
+    ts_input input;
+    long count = 0;
+
+    if (stats) {
+        memset(stats, 0, sizeof(*stats));
+    }
+    if (id_count) {
+        *id_count = 0;
+    }
+    if (open_archives(data_dir, &input)) {
+        count = tex_scan_shared(&input, names, name_cap, ids, id_cap, id_count, stats);
+    }
+    close_archives();
     return count;
 }
 
@@ -188,8 +229,10 @@ static DWORD WINAPI scan_thread(LPVOID unused)
     wchar_t dir[PATH_CHARS];
     wchar_t *slash = NULL;
     ts_stats stats;
+    ts_shared_stats shared;
     DWORD started = GetTickCount();
-    long count = 0;
+    long count = 0, n_shared = 0;
+    size_t shared_ids = 0;
     unsigned archives = 0;
 
     (void)unused;
@@ -206,6 +249,15 @@ static DWORD WINAPI scan_thread(LPVOID unused)
     if (slash) {
         wcscpy(slash, L"\\data_win32");
         count = tex_stale_scan_folder(dir, g_stale, MAX_STALE, &stats, &archives);
+        n_shared = tex_stale_scan_folder_shared(dir, g_shared_names, MAX_SHARED, g_shared_ids, MAX_SHARED * 2,
+                                                &shared_ids, &shared);
+    } else {
+        memset(&shared, 0, sizeof(shared));
+    }
+    if (n_shared < 0) {
+        LOGE("textures: not enough memory to look for top mip level files that several textures share");
+        n_shared = 0;
+        shared_ids = 0;
     }
     if (count < 0) {
         LOGE("textures: not enough memory to check the patch archive for replaced textures");
@@ -227,6 +279,20 @@ static DWORD WINAPI scan_thread(LPVOID unused)
              "may still show up close",
              stats.truncated);
     }
+    if (n_shared > 0) {
+        LOGI("textures: %ld top mip level files are named by more than one texture (%u by several textures of the "
+             "patch archive, %u by one of them and one of the game). The game is built for one texture per "
+             "file; %s",
+             n_shared, shared.among_override, shared.with_game,
+             g_shared_handled ? "these files will not be loaded"
+                              : "with [Textures] SkipSharedMip0=0 it loads them and may crash when it unloads them");
+    }
+    if (shared.truncated) {
+        LOGE("textures: more shared top mip level files than this patch keeps track of (%u left unlisted)",
+             shared.truncated);
+    }
+    g_shared_id_count = (LONG)shared_ids;
+    InterlockedExchange(&g_shared_name_count, (LONG)n_shared);
     InterlockedExchange(&g_stale_count, (LONG)count);
     SetEvent(g_done);
     return 0;
@@ -278,4 +344,49 @@ int tex_stale_check(const void *buffer, const void *dds, unsigned dds_size)
         return 0;
     }
     return tex_scan_contains(g_stale, (size_t)g_stale_count, dn_top_identity(xbt, image, dds_size, dds_size));
+}
+
+/* Has the scan finished? Waits a moment the first time something asks. */
+static int scan_done(void)
+{
+    if (!g_done) {
+        return 0;
+    }
+    return WaitForSingleObject(g_done, InterlockedExchange(&g_waited, 1) ? 0 : FIRST_WAIT_MS) == WAIT_OBJECT_0;
+}
+
+void tex_stale_shared_handled(void)
+{
+    InterlockedExchange(&g_shared_handled, 1);
+}
+
+long tex_stale_shared_count(void)
+{
+    return g_done && WaitForSingleObject(g_done, 0) == WAIT_OBJECT_0 ? (long)g_shared_name_count : -1;
+}
+
+int tex_stale_shared_name(unsigned long long name_hash)
+{
+    if (!scan_done() || g_shared_name_count <= 0) {
+        return 0;
+    }
+    return tex_scan_contains(g_shared_names, (size_t)g_shared_name_count, name_hash);
+}
+
+int tex_stale_shared_file(const void *file, unsigned size)
+{
+    const unsigned char *xbt = (const unsigned char *)file;
+    unsigned long header;
+
+    if (!scan_done() || g_shared_id_count <= 0 || !xbt || size < DN_XBT_FIXED_HEADER + 128 ||
+        memcmp(xbt, "TBX\0", 4) != 0) {
+        return 0;
+    }
+    header = (unsigned long)xbt[8] | ((unsigned long)xbt[9] << 8) | ((unsigned long)xbt[10] << 16) |
+             ((unsigned long)xbt[11] << 24);
+    if (header < DN_XBT_FIXED_HEADER || header > DN_XBT_FIXED_HEADER + DN_XBT_MAX_PATH || header + 128 > size) {
+        return 0;
+    }
+    return tex_scan_contains(g_shared_ids, (size_t)g_shared_id_count,
+                             dn_top_identity(xbt, xbt + header, size - header, size - header));
 }

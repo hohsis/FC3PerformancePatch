@@ -17,6 +17,7 @@ replaced, and no Ubisoft files are included.
 | **2 GB memory limit** | 4 GB (Large Address Aware flag on the `.exe`, original kept as a backup) |
 | **Fullscreen lost after Alt+Tab** (DX11): the game comes back windowed and stays windowed | Fullscreen is restored when you return |
 | **Texture mods crash the game** (DX11) unless `DisableMip0Loading="1"` is set, which lowers detail everywhere | Only the texture levels that do not belong to the mod's textures are left out; no special `GamerProfile.xml` needed |
+| **Texture mods crash the game after hours of play**: several textures share one close-up texture file and the game writes into freed memory when it unloads it (Far Cry 3) | Such files are found at start-up and not loaded |
 | **Blurry or mis-sized window** on displays scaled above 100 % | The game is marked DPI aware |
 | **Sound library unloaded while in use** (`XAudio2_7.dll_unloaded` crashes) | The library stays loaded |
 | Coarse system timer, "Not responding" window while loading | 1 ms timer requested, ghost window disabled |
@@ -96,6 +97,7 @@ of versions at launch, pick the DirectX 11 one: the menu does not exist in the D
 | `[Display] RestoreFullscreenOnFocus` | `1` | Fullscreen after Alt+Tab (DX11) |
 | `[Textures] SkipMismatchedMip0` | `1` | Texture mod crash guard (DX11) |
 | `[Textures] SkipReplacedTextureMip0` | `1` | Keeps the game's original close-up texture from showing through a mod's replacement |
+| `[Textures] SkipSharedMip0` | `1` | Does not load close-up texture files that several textures share (crash after long play with some mods) |
 | `[Controls] AutoSwitchInput` | `0` | `1` = gamepad or keyboard/mouse mode follows what you use |
 | `[Graphics] DrawDistance` | `0` | `1` = far, `2` = very far |
 | `[Menu] Key` | `F8` | The key that opens the in-game menu; `[Menu] Enabled=0` removes the menu |
@@ -127,10 +129,15 @@ Verified:
 - The texture crash: cause established from a crash dump; the fix is tested on the real engine DLLs of
   both games, and Far Cry 3 (DX11) was played with a large HD texture mod and the game's normal settings:
   it loads and runs where it crashed before, and the log shows the unfitting levels being left out.
+- The late crash with texture mods: cause established from a player's crash dump and the mod's archives
+  (49 close-up texture files named by up to 17 textures each; none in the unmodded game). The game's
+  own unload routine, run from the real DLL on a stand-in texture whose record was freed, faults at
+  the address in the dump; through the patch it does not.
 - The in-game menu draws correctly on a real Direct3D 11 device and leaves the device's state as it
   found it (automated test at 720p and 4K), and can be operated with a gamepad alone: an automated
   test opens it with the button combination, changes settings and closes it again, with a stand-in
-  gamepad.
+  gamepad. That test also passes on Linux under Proton's Wine with DXVK, the graphics layer SteamOS
+  uses.
 - The two extras as far as they can be without playing: the code they rely on is found in the engine
   DLLs of both games (DX9 and DX11), the game's render settings are read from the real archives, and
   both run in a test program against stand-in input devices and a stand-in profile.
@@ -147,6 +154,8 @@ Not verified:
   whether the game switches cleanly in every screen, and whether it takes the longer distances and
   what they cost, is not known yet. That is why both are off by default.
 - The texture guard with Blood Dragon or with the DX9 executable (not supported there).
+- `SkipSharedMip0` in play: the crash it addresses came after 2 h 45 min, so its absence cannot be
+  confirmed quickly. Not available for Blood Dragon (its code is not recognised yet).
 - `SkipReplacedTextureMip0` in play: it is tested on synthetic archives and finds the expected files in a
   real modded installation, but the result on screen was not yet checked.
 - The game under Proton or on a Steam Deck, on AMD or Intel graphics, or on a real 32-thread Intel processor.

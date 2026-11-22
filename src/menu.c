@@ -43,6 +43,7 @@ enum {
     ID_DPI_AWARE,
     ID_TEX_MISMATCHED,
     ID_TEX_REPLACED,
+    ID_TEX_SHARED,
     ID_KEEP_XAUDIO,
     ID_AUTO_SWITCH,
     ID_DRAW_DISTANCE,
@@ -92,6 +93,9 @@ static mm_item g_items[] = {
            "Texture mods crash the game without this, unless mip0 loading is switched off in GamerProfile.xml."),
     TOGGLE(ID_TEX_REPLACED, "Leave out originals of replaced textures",
            "Keeps the game's original close-up texture from showing through a texture a mod has repainted."),
+    TOGGLE(ID_TEX_SHARED, "Leave out levels several textures share",
+           "Some texture mods make several textures use one close-up texture file. The game is not built for "
+           "that and can crash after hours of play."),
     HEADING("Sound"),
     TOGGLE(ID_KEEP_XAUDIO, "Keep the sound library loaded",
            "Guards against a known defect of XAudio2 2.7 that can crash the game."),
@@ -168,6 +172,7 @@ void menu_init(const fc3pp_config *cfg, const wchar_t *ini_path)
     set_value(ID_DPI_AWARE, cfg->high_dpi_aware);
     set_value(ID_TEX_MISMATCHED, cfg->texture_guard);
     set_value(ID_TEX_REPLACED, cfg->texture_scan);
+    set_value(ID_TEX_SHARED, cfg->texture_shared);
     set_value(ID_KEEP_XAUDIO, cfg->keep_xaudio2_loaded);
     set_value(ID_AUTO_SWITCH, cfg->auto_switch_input);
     set_value(ID_DRAW_DISTANCE, cfg->draw_distance);
@@ -235,6 +240,9 @@ static void save(int id)
         break;
     case ID_TEX_REPLACED:
         section = L"Textures", key = L"SkipReplacedTextureMip0";
+        break;
+    case ID_TEX_SHARED:
+        section = L"Textures", key = L"SkipSharedMip0";
         break;
     case ID_KEEP_XAUDIO:
         section = L"Audio", key = L"KeepXAudio2Loaded";

@@ -54,14 +54,14 @@ endif()
 # ---- pure logic (no OS calls): unit-testable ------------------------------
 add_library(fc3pp_core STATIC
     src/ini.c src/config.c src/sigscan.c src/pe_file.c src/cpu_topology.c src/patches.c src/fs_guard.c
-    src/tex_rule.c src/dunia.c src/tex_scan.c src/menu_model.c src/menu_draw.c src/padmode.c src/gfx_preset.c)
+    src/tex_rule.c src/tex_link.c src/dunia.c src/tex_scan.c src/menu_model.c src/menu_draw.c src/padmode.c src/gfx_preset.c)
 target_include_directories(fc3pp_core PUBLIC src)
 target_link_libraries(fc3pp_core PUBLIC fc3pp_options)
 
 # ---- Win32 layer -----------------------------------------------------------
 add_library(fc3pp_win STATIC
     src/pe_image.c src/log.c src/cpu_shim.c src/laa.c src/vtable.c src/display.c src/audio.c
-    src/texguard.c src/tex_stale.c src/overlay.c src/menu.c src/padswitch.c src/gfx_profile.c)
+    src/texguard.c src/texlink.c src/tex_stale.c src/overlay.c src/menu.c src/padswitch.c src/gfx_profile.c)
 target_link_libraries(fc3pp_win PUBLIC fc3pp_core user32 gdi32)
 
 # ---- the proxy DLL -----------------------------------------------------------

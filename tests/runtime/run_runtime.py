@@ -34,7 +34,7 @@ def ini(**kw):
         "enabled": 1, "log": 3, "fix": 1, "mode": "engine", "max_cores": 3, "smt": 0,
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
         "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0, "texguard": 1,
-        "texscan": 1, "menu": 1, "menu_open": 0, "autoswitch": 0, "focus": 0, "distance": 0,
+        "texscan": 1, "texshared": 1, "menu": 1, "menu_open": 0, "autoswitch": 0, "focus": 0, "distance": 0,
         "pad": "L3+R3",
     }
     values.update(kw)
@@ -44,7 +44,7 @@ def ini(**kw):
         "[Timing]\nTimerResolutionMs={timer}\nSleepZeroYield={sleep_yield}\n"
         "[Memory]\nApplyLargeAddressAware={laa}\n"
         "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
-        "[Textures]\nSkipMismatchedMip0={texguard}\nSkipReplacedTextureMip0={texscan}\n"
+        "[Textures]\nSkipMismatchedMip0={texguard}\nSkipReplacedTextureMip0={texscan}\nSkipSharedMip0={texshared}\n"
         "[Menu]\nEnabled={menu}\nKey=F9\nPadButtons={pad}\n"
         "[Controls]\nAutoSwitchInput={autoswitch}\n"
         "[Graphics]\nDrawDistance={distance}\n"
@@ -152,8 +152,29 @@ SCENARIOS = {
                   "1 in a different pixel format), 2 left out because a mod replaced their texture, "
                   "1 not added by the engine itself; 7 matching unload requests ignored"],
                  ["ERROR"]),
-    "textures-off": (HARNESS, ini(texguard=0), ["textures-off"], True,
+    "textures-off": (HARNESS, ini(texguard=0, texshared=0), ["textures-off"], True,
                      ["initialised"], ["texture guard", "textures:", "ERROR"]),
+    # Two textures of the "mod" name one top level file. The engine fixture's top
+    # level resources follow their link to a texture as the game's do, and
+    # that texture is gone: without the patch the host would crash.
+    "shared-tops": (HARNESS, ini(), ["shared-tops"], True,
+                    ["FC3_d3d11.dll: top mip level files that more than one texture names will be left unloaded "
+                     "('release' build variant)",
+                     "textures: 1 top mip level files are named by more than one texture (1 by several textures "
+                     "of the patch archive, 0 by one of them and one of the game). The game is built for one "
+                     "texture per file; these files will not be loaded",
+                     "textures: left a top mip level file unloaded because more than one texture names it",
+                     "textures: a top mip level was about to be taken from a texture that no longer exists "
+                     "(its record is gone)",
+                     "textures: 3 loads of top mip level files that several textures name were left out "
+                     "(1 recognised by name, 2 by content; 3 unloads to match); 2 unloads for a texture that no "
+                     "longer existed were left out"], []),
+    "shared-tops-dx9": (HARNESS_DX9, ini(), ["shared-tops"], True,
+                        ["FC3.dll: top mip level files that more than one texture names will be left unloaded",
+                         "textures: 3 loads of top mip level files that several textures name were left out"], []),
+    "shared-tops-off": (HARNESS, ini(texshared=0), ["shared-tops-off"], True,
+                        ["with [Textures] SkipSharedMip0=0 it loads them and may crash when it unloads them"],
+                        ["will be left unloaded", "left a top mip level file unloaded", "ERROR"]),
     "textures-noscan": (HARNESS, ini(texscan=0), ["textures-noscan"], True,
                         ["texture guard active"], ["patch archive", "a mod has replaced", "ERROR"]),
     "fullscreen": (HARNESS, ini(), ["fullscreen"], True,
@@ -350,6 +371,33 @@ GAMER_PROFILE = (
     '</GamerProfile>' + "\r\n")
 
 
+def setup_shared_archives(d):
+    """A "mod" in which two textures name the same top mip level file, and the
+    files the engine then has in its hands next to the host."""
+    sep = chr(92)
+    data = os.path.join(os.path.dirname(d), "data_win32")
+    shutil.rmtree(data, ignore_errors=True)
+    os.makedirs(os.path.join(data, "worlds", "main"))
+    boar_top_name, rock_top_name = "tex" + sep + "boar_d_mip0.xbt", "tex" + sep + "rock_d_mip0.xbt"
+    boar_top = make_xbt(None, 1, 128, 128, b"DXT1", 1500, 11)
+    rock_base = make_xbt(rock_top_name, 2, 64, 64, b"DXT5", 700, 20)
+    rock_top = make_xbt(None, 2, 128, 128, b"DXT5", 1500, 21)
+    write_archive(data, "patch", {
+        "tex" + sep + "boar_a.xbt": make_xbt(boar_top_name, 1, 64, 64, b"DXT1", 700, 30),
+        "tex" + sep + "boar_b.xbt": make_xbt(boar_top_name, 1, 64, 64, b"DXT5", 700, 31),
+        "tex" + sep + "rock_d.xbt": rock_base,
+    })
+    write_archive(os.path.join(data, "worlds", "main"), "main", {
+        boar_top_name: boar_top,
+        "tex" + sep + "rock_d.xbt": rock_base,
+        rock_top_name: rock_top,
+    })
+    with open(os.path.join(d, "shared_top.xbt"), "wb") as f:
+        f.write(boar_top)
+    with open(os.path.join(d, "fresh_top.xbt"), "wb") as f:
+        f.write(rock_top)
+
+
 def setup_profile(d, with_archives=True):
     """A player's profile next to the host and, in <d>/../data_win32, the
     game's default render configuration in its "common" archive."""
@@ -376,6 +424,8 @@ def setup_profile_only(d):
 # Scenarios whose host sits in <work>/<name>/bin, next to a data folder, as
 # the game sits in <game>/bin next to <game>/data_win32.
 WITH_DATA = {"textures": setup_texture_archives, "textures-noscan": setup_texture_archives,
+             "shared-tops": setup_shared_archives, "shared-tops-dx9": setup_shared_archives,
+             "shared-tops-off": setup_shared_archives,
              "drawdistance": setup_profile, "drawdistance-off": setup_profile,
              "drawdistance-nodata": setup_profile_only}
 

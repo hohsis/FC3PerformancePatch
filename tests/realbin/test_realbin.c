@@ -31,9 +31,11 @@
 #include "patches.h"
 #include "pe_file.h"
 #include "pe_image.h"
+#include "tex_link.h"
 #include "tex_rule.h"
 #include "tex_stale.h"
 #include "texguard.h"
+#include "texlink.h"
 
 static int g_failures;
 static int g_checks;
@@ -349,6 +351,193 @@ static void test_texture_guard(HMODULE mod, void **table, unsigned add_slot)
            "refused before the game's code runs, and the unload that follows is ignored\n");
 }
 
+
+/* ---- top mip level files that several textures share --------------------------------
+ * The engine's "top level resource" follows a link to one texture when it is
+ * unloaded and writes to that texture's record. Here the game's own Unload is
+ * called on stand-in objects: once with everything in place (which shows that
+ * the offsets this patch relies on are the ones the code uses), once with the
+ * record freed (the crash, at the address players' crash dumps show), and
+ * then through the patch's wrapper (no crash). */
+
+typedef void(__fastcall *top_unload_fn)(void *self, void *unused);
+
+static DWORD g_fault_thread;
+static void *volatile g_fault_code;
+static void *volatile g_fault_data;
+
+static LONG CALLBACK fault_catcher(EXCEPTION_POINTERS *info)
+{
+    if (info->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        GetCurrentThreadId() == g_fault_thread) {
+        g_fault_code = info->ExceptionRecord->ExceptionAddress;
+        g_fault_data = (void *)info->ExceptionRecord->ExceptionInformation[1];
+        ExitThread(2);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+typedef struct top_call {
+    top_unload_fn fn;
+    void *self;
+} top_call;
+
+static DWORD WINAPI top_call_thread(LPVOID arg)
+{
+    top_call *c = (top_call *)arg;
+    g_fault_thread = GetCurrentThreadId();
+    c->fn(c->self, NULL);
+    return 0;
+}
+
+/* Returns 0 when the call returned, 2 when it faulted, 3 when it hung. */
+static DWORD call_top_unload(top_unload_fn fn, void *self)
+{
+    top_call c;
+    HANDLE thread;
+    void *handler;
+    DWORD code = 3;
+
+    c.fn = fn;
+    c.self = self;
+    g_fault_code = g_fault_data = NULL;
+    handler = AddVectoredExceptionHandler(1, fault_catcher);
+    thread = CreateThread(NULL, 0, top_call_thread, &c, 0, NULL);
+    if (thread) {
+        if (WaitForSingleObject(thread, 10000) == WAIT_OBJECT_0) {
+            GetExitCodeThread(thread, &code);
+        } else {
+            TerminateThread(thread, 3);
+        }
+        CloseHandle(thread);
+    }
+    RemoveVectoredExceptionHandler(handler);
+    g_fault_thread = 0;
+    return code;
+}
+
+static void test_top_level_link(HMODULE mod, const pei_section *sec, unsigned nsec, const char *module_name,
+                                int expected)
+{
+    static unsigned char resource[0x40], texture[0x60], record[0x40];
+    tl_site site;
+    unsigned i, slots = 0;
+    unsigned long slot_va = 0, value;
+    int found = 0;
+    void **table;
+    void *gone, *p;
+    DWORD result;
+
+    memset(&site, 0, sizeof(site));
+    for (i = 0; i < nsec && i < 32 && found == 0; ++i) {
+        if ((sec[i].characteristics & IMAGE_SCN_MEM_EXECUTE) && sec[i].size) {
+            found = tl_find_methods(sec[i].start, sec[i].size, (unsigned long)(ULONG_PTR)sec[i].start, &site);
+        }
+    }
+    for (i = 0; i < nsec && i < 32 && found == 1; ++i) {
+        if (sec[i].size && (sec[i].characteristics & IMAGE_SCN_MEM_READ) &&
+            !(sec[i].characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_DISCARDABLE))) {
+            unsigned long first = 0;
+            unsigned n = tl_find_slots(sec[i].start, sec[i].size, (unsigned long)(ULONG_PTR)sec[i].start, &site, &first);
+            if (n && !slots) {
+                slot_va = first;
+            }
+            slots += n;
+        }
+    }
+    if (!expected && found == 0) {
+        printf("    top level resource class: not recognised in this build (shared top mip level files are not "
+               "handled here)\n");
+        return;
+    }
+    CHECK(found == 1, "top level resource methods: %s", found == 0 ? "not found" : "more than one candidate");
+    CHECK(found != 1 || slots == 1, "top level resource class: %u virtual tables hold the two methods, expected 1",
+          slots);
+    if (found != 1 || slots != 1) {
+        return;
+    }
+    table = (void **)(ULONG_PTR)slot_va;
+    printf("    top level resource class: '%s' variant, Load at RVA 0x%08lX, Unload at RVA 0x%08lX, table slots at "
+           "RVA 0x%08lX\n",
+           site.variant, site.load - (unsigned long)(ULONG_PTR)mod, site.unload - (unsigned long)(ULONG_PTR)mod,
+           slot_va - (unsigned long)(ULONG_PTR)mod);
+
+    /* 1. Everything in place: a texture with one user and a record with one level. */
+    memset(resource, 0, sizeof(resource));
+    memset(texture, 0, sizeof(texture));
+    memset(record, 0, sizeof(record));
+    p = texture;
+    memcpy(resource + TL_OFFSET_LINK, &p, sizeof(p));
+    resource[TL_OFFSET_VALID] = 1;
+    value = 99;
+    memcpy(resource + TL_OFFSET_SIZE, &value, 4);
+    p = record;
+    memcpy(texture + TL_TEXTURE_RECORD, &p, sizeof(p));
+    value = 1;
+    memcpy(texture + TL_TEXTURE_USERS, &value, 4);
+    texture[0x42] = 1; /* "has its top level" */
+    value = 5;
+    memcpy(record + 0x20, &value, 4); /* the counter Drop decrements first */
+    value = 1;
+    memcpy(record + 0x18, &value, 4); /* levels: one, so Drop stops there */
+    memcpy(record + 0x10, &value, 4);
+    memcpy(record + 0x14, &value, 4);
+    result = call_top_unload((top_unload_fn)(ULONG_PTR)site.unload, resource);
+    memcpy(&value, record + 0x20, 4);
+    CHECK(result == 0 && value == 4 && texture[0x42] == 0,
+          "the game's Unload did not do what this patch assumes (result %lu, record counter %lu, flag %u)",
+          (unsigned long)result, value, texture[0x42]);
+    memcpy(&value, resource + TL_OFFSET_SIZE, 4);
+    CHECK(value == 0, "the game's Unload left the resource's size at %lu", value);
+
+    /* 2. The linked texture's record has been freed: memory that is gone. */
+    gone = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!gone) {
+        return;
+    }
+    VirtualFree(gone, 0, MEM_RELEASE);
+    p = (unsigned char *)gone + 0x100;
+    memcpy(texture + TL_TEXTURE_RECORD, &p, sizeof(p));
+    texture[0x42] = 1;
+    value = 99;
+    memcpy(resource + TL_OFFSET_SIZE, &value, 4);
+    result = call_top_unload((top_unload_fn)(ULONG_PTR)site.unload, resource);
+    CHECK(result == 2 && g_fault_data == (void *)((unsigned char *)gone + 0x120),
+          "the game's Unload did not fault on a freed record (result %lu)", (unsigned long)result);
+    if (result == 2) {
+        printf("    unpatched, texture record freed: access violation at RVA 0x%08lX writing the record (bug "
+               "reproduced)\n",
+               (unsigned long)((ULONG_PTR)g_fault_code - (ULONG_PTR)mod));
+    }
+
+    /* 3. The same through the patch's wrapper. */
+    CHECK(texlink_install(mod, module_name) == 1, "the wrapper could not be installed on the game's table");
+    CHECK(table[1] != (void *)(ULONG_PTR)site.unload && table[0] != (void *)(ULONG_PTR)site.load,
+          "the game's table still holds its own methods");
+    result = call_top_unload((top_unload_fn)table[1], resource);
+    memcpy(&value, resource + TL_OFFSET_SIZE, 4);
+    CHECK(result == 0 && value == 0, "patched: Unload with a freed record: result %lu, size %lu",
+          (unsigned long)result, value);
+    /* ... and with everything in place it still does the game's work. */
+    p = record;
+    memcpy(texture + TL_TEXTURE_RECORD, &p, sizeof(p));
+    texture[0x42] = 1;
+    value = 5;
+    memcpy(record + 0x20, &value, 4);
+    result = call_top_unload((top_unload_fn)table[1], resource);
+    memcpy(&value, record + 0x20, 4);
+    CHECK(result == 0 && value == 4 && texture[0x42] == 0, "patched: an ordinary Unload no longer reaches the game");
+    /* a resource without a texture at all */
+    p = NULL;
+    memcpy(resource + TL_OFFSET_LINK, &p, sizeof(p));
+    result = call_top_unload((top_unload_fn)table[1], resource);
+    CHECK(result == 0, "patched: Unload without a linked texture: result %lu", (unsigned long)result);
+    if (!g_failures) {
+        printf("    patched,   texture record freed: returns, nothing written; an ordinary unload still runs the "
+               "game's code\n");
+    }
+}
+
 static void test_engine_module(const wchar_t *dir, const wchar_t *name)
 {
     wchar_t path[MAX_PATH];
@@ -582,6 +771,17 @@ static void test_engine_module(const wchar_t *dir, const wchar_t *name)
             test_texture_guard(mod, (void **)(ULONG_PTR)slot - site.add_slot, site.add_slot);
         }
     }
+    if (_wcsicmp(name, L"FC3_d3d11.dll") == 0 || _wcsicmp(name, L"FC3.dll") == 0) {
+        wchar_t exe[MAX_PATH];
+        char narrow[32];
+        int far_cry_3;
+
+        _snwprintf(exe, MAX_PATH, L"%ls\\farcry3.exe", dir);
+        exe[MAX_PATH - 1] = L'\0';
+        far_cry_3 = GetFileAttributesW(exe) != INVALID_FILE_ATTRIBUTES;
+        WideCharToMultiByte(CP_ACP, 0, name, -1, narrow, sizeof(narrow), NULL, NULL);
+        test_top_level_link(mod, sec, nsec, narrow, far_cry_3);
+    }
     FreeLibrary(mod);
 }
 
@@ -731,6 +931,18 @@ static void test_archives(const wchar_t *bin_dir)
            "    still fits (%ld files to leave out)\n",
            stats.own_top, stats.missing, stats.unfit, stats.unchanged, stats.stale, count);
     test_render_config(data_dir);
+    {
+        static unsigned long long names[1024], shared_ids[2048];
+        ts_shared_stats shared;
+        size_t n_ids = 0;
+        long n = tex_stale_scan_folder_shared(data_dir, names, 1024, shared_ids, 2048, &n_ids, &shared);
+
+        CHECK(n >= 0 && shared.truncated == 0, "the scan for shared top mip level files failed");
+        CHECK((unsigned)n == shared.among_override + shared.with_game, "the shared files do not add up");
+        printf("    top mip level files named by more than one texture: %ld (%u by several textures of the patch "
+               "archive, %u by one of them and one of the game); %lu copies of them in the archives\n",
+               n, shared.among_override, shared.with_game, (unsigned long)n_ids);
+    }
 }
 
 static void test_directory(const wchar_t *dir)

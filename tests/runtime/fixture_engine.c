@@ -702,6 +702,129 @@ FX_API int fx_write_file(const wchar_t *path, const char *data, unsigned size)
     return ok ? 0 : -1;
 }
 
+/* ---- top level resources ----------------------------------------------------------------
+ * The class that loads a texture's top mip level from its own file. Each such
+ * object is linked to one texture; Load and Unload follow that link and write
+ * to the texture and its record (tex_link.h). The two methods begin like the
+ * engine's and sit in slots 26 and 27 of the class's table, as there. */
+#ifdef FX_NO_TEXTURES
+#include "../unit/tex_blobs.h"
+#endif
+
+#if defined(_MSC_VER)
+#pragma section(".fxtop", execute, read)
+__declspec(allocate(".fxtop")) static const unsigned char fx_top_load_code[] = {TOP_BLOB_LOAD};
+__declspec(allocate(".fxtop")) static const unsigned char fx_top_unload_code[] = {TOP_BLOB_UNLOAD};
+#else
+static const unsigned char fx_top_load_code[] __attribute__((section(".fxtop,\"xr\"#"), used)) = {TOP_BLOB_LOAD};
+static const unsigned char fx_top_unload_code[] __attribute__((section(".fxtop,\"xr\"#"), used)) = {TOP_BLOB_UNLOAD};
+#endif
+
+static void __fastcall fx_top_unused_method(void *self, void *unused)
+{
+    (void)self;
+    (void)unused;
+}
+
+#define FX_TOP_UNUSED (void *)fx_top_unused_method
+static void *const g_fx_top_vtbl[28] = {
+    FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED,
+    FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED,
+    FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED,
+    FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED, FX_TOP_UNUSED,
+    (void *)fx_top_load_code,   /* 26 Load   */
+    (void *)fx_top_unload_code, /* 27 Unload */
+};
+
+typedef struct fx_top_record {
+    unsigned char other[0x20];
+    LONG counter; /* +20h */
+    unsigned char rest[0x1C];
+} fx_top_record;
+
+typedef struct fx_top_texture {
+    unsigned char other[0x28];
+    LONG added;            /* +28h */
+    unsigned reserved;     /* +2Ch */
+    fx_top_record *record; /* +30h */
+    unsigned char more[0x14];
+    unsigned users;        /* +48h */
+    unsigned char rest[0x0C];
+} fx_top_texture;
+
+typedef struct fx_top_resource {
+    void *const *vtbl;         /* +00h */
+    LONG loads;                /* +04h */
+    LONG unloads;              /* +08h */
+    unsigned char other[0x14];
+    unsigned name_low;         /* +20h */
+    unsigned name_high;        /* +24h */
+    unsigned size;             /* +28h */
+    unsigned flags;            /* +2Ch */
+    fx_top_texture *link;      /* +30h */
+    unsigned char valid;       /* +34h */
+    unsigned char rest[0x0B];
+} fx_top_resource;
+
+typedef unsigned char(__fastcall *fx_top_load_fn)(fx_top_resource *, void *, const void *, unsigned);
+typedef void(__fastcall *fx_top_unload_fn)(fx_top_resource *, void *);
+
+static fx_top_resource g_fx_tops[4];
+static fx_top_texture g_fx_top_textures[4];
+static fx_top_record g_fx_top_records[4];
+
+/* (Re)creates top level resource number `index`, named by the two halves of
+ * the file's name hash. link: 0 = to a texture with a record, as it should
+ * be; 1 = to a texture that was destroyed (its memory is gone); 2 = to a
+ * texture whose record was destroyed. */
+FX_API void *fx_top_create(unsigned index, unsigned name_low, unsigned name_high, int link)
+{
+    fx_top_resource *r = &g_fx_tops[index & 3];
+    fx_top_texture *t = &g_fx_top_textures[index & 3];
+    void *gone = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+    if (gone) {
+        VirtualFree(gone, 0, MEM_RELEASE);
+    }
+    memset(r, 0, sizeof(*r));
+    memset(t, 0, sizeof(*t));
+    memset(&g_fx_top_records[index & 3], 0, sizeof(fx_top_record));
+    g_fx_top_records[index & 3].counter = 100;
+    t->users = 1;
+    t->record = link == 2 ? (fx_top_record *)gone : &g_fx_top_records[index & 3];
+    r->vtbl = g_fx_top_vtbl;
+    r->name_low = name_low;
+    r->name_high = name_high;
+    r->size = 4096;
+    r->link = link == 1 ? (fx_top_texture *)gone : t;
+    r->valid = 1;
+    return r;
+}
+
+/* The engine hands a top level file to its resource. Returns what Load returns: 0 = added. */
+FX_API int fx_top_load(void *resource, const void *file, unsigned size)
+{
+    fx_top_resource *r = (fx_top_resource *)resource;
+    return ((fx_top_load_fn)r->vtbl[26])(r, NULL, file, size);
+}
+
+FX_API void fx_top_unload(void *resource)
+{
+    fx_top_resource *r = (fx_top_resource *)resource;
+    ((fx_top_unload_fn)r->vtbl[27])(r, NULL);
+}
+
+/* out: calls that reached Load, calls that reached Unload, top levels added
+ * to the linked texture, the record's counter, the resource's size field. */
+FX_API void fx_top_state(unsigned index, long out[5])
+{
+    out[0] = g_fx_tops[index & 3].loads;
+    out[1] = g_fx_tops[index & 3].unloads;
+    out[2] = g_fx_top_textures[index & 3].added;
+    out[3] = g_fx_top_records[index & 3].counter;
+    out[4] = (long)g_fx_tops[index & 3].size;
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
     (void)instance;

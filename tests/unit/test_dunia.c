@@ -516,6 +516,151 @@ static void test_scan(void)
     free(world->dat);
 }
 
+/* Top level files that several textures name. */
+static void test_scan_shared(void)
+{
+    static unsigned char boar_a[1024], boar_b[1024], boar_top[2048];
+    static unsigned char crab_x[1024], crab_game[1024], crab_top[2048], crab_top2[2048];
+    static unsigned char rock[1024], rock_top[2048];
+    static unsigned char own[1024], own_top[2048], gone[1024];
+    static unsigned char twin1[1024], twin2[1024], twin_top[2048];
+    static unsigned char moved_mod[1024], moved_game[1024], rock2_top[2048];
+    size_t n_boar_a, n_boar_b, n_boar_top, n_crab_x, n_crab_game, n_crab_top, n_crab_top2, n_rock, n_rock_top;
+    size_t n_own, n_own_top, n_gone, n_twin1, n_twin2, n_twin_top, n_moved_mod, n_moved_game, n_rock2_top;
+    mem_archive *mod = &g_arch[0], *game = &g_arch[1], *world = &g_arch[2];
+    dn_fat fats[3];
+    ts_input in;
+    ts_shared_stats stats;
+    unsigned long long names[8], ids[8];
+    size_t n_ids = 99;
+    long n;
+
+    memset(g_arch, 0, sizeof(g_arch));
+
+    /* boar: two textures of the mod name the game's one top level file */
+    n_boar_a = make_xbt(boar_a, "tex\\boar_d_mip0.xbt", 1, BC1_BASE, BC1_BASE, "DXT1", 700, 10);
+    n_boar_b = make_xbt(boar_b, "tex\\BOAR_D_mip0.xbt", 1, BC1_BASE, BC1_BASE, "DXT5", 700, 11); /* names ignore case */
+    n_boar_top = make_xbt(boar_top, NULL, 1, 2 * BC1_BASE, 2 * BC1_BASE, "DXT1", 1500, 12);
+    /* crab: a new texture of the mod names a top level that still has its owner in the game */
+    n_crab_x = make_xbt(crab_x, "tex\\crab_d_mip0.xbt", 2, BC1_BASE, BC1_BASE, "DXT1", 700, 20);
+    n_crab_game = make_xbt(crab_game, "tex\\crab_d_mip0.xbt", 2, BC1_BASE, BC1_BASE, "DXT1", 700, 21);
+    n_crab_top = make_xbt(crab_top, NULL, 2, 2 * BC1_BASE, 2 * BC1_BASE, "DXT1", 1500, 22);
+    n_crab_top2 = make_xbt(crab_top2, NULL, 2, 2 * BC1_BASE, 2 * BC1_BASE, "DXT1", 1500, 23); /* another version */
+    /* rock: the mod replaces the texture that owns the top level - one claimant, as before */
+    n_rock = make_xbt(rock, "tex\\rock_d_mip0.xbt", 3, BC1_BASE, BC1_BASE, "DXT1", 700, 30);
+    n_rock_top = make_xbt(rock_top, NULL, 3, 2 * BC1_BASE, 2 * BC1_BASE, "DXT1", 1500, 31);
+    /* own: the mod's own pair; gone: a top level that exists nowhere */
+    n_own = make_xbt(own, "tex\\own_d_mip0.xbt", 4, BC1_BASE, BC1_BASE, "DXT1", 700, 40);
+    n_own_top = make_xbt(own_top, NULL, 4, 2 * BC1_BASE, 2 * BC1_BASE, "DXT1", 1500, 41);
+    n_gone = make_xbt(gone, "tex\\gone_d_mip0.xbt", 5, BC1_BASE, BC1_BASE, "DXT1", 700, 50);
+    /* twins: two textures of the mod share a top level the mod brings itself */
+    n_twin1 = make_xbt(twin1, "tex\\twin_mip0.xbt", 6, BC1_BASE, BC1_BASE, "DXT1", 700, 60);
+    n_twin2 = make_xbt(twin2, "tex\\twin_mip0.xbt", 6, 2 * BC1_BASE, BC1_BASE, "DXT1", 700, 61);
+    n_twin_top = make_xbt(twin_top, NULL, 6, 2 * BC1_BASE, 2 * BC1_BASE, "DXT1", 1500, 62);
+    /* moved: the mod's version of a game texture names another texture's top level */
+    n_moved_mod = make_xbt(moved_mod, "tex\\rock2_mip0.xbt", 7, BC1_BASE, BC1_BASE, "DXT1", 700, 70);
+    n_moved_game = make_xbt(moved_game, "tex\\moved_old_mip0.xbt", 7, BC1_BASE, BC1_BASE, "DXT1", 700, 71);
+    n_rock2_top = make_xbt(rock2_top, NULL, 8, 2 * BC1_BASE, 2 * BC1_BASE, "DXT1", 1500, 72);
+
+    arch_add(mod, "tex\\boar_a.xbt", boar_a, n_boar_a, 0);
+    arch_add(mod, "tex\\boar_b.xbt", boar_b, n_boar_b, 0);
+    arch_add(mod, "tex\\crab_x.xbt", crab_x, n_crab_x, 0);
+    arch_add(mod, "tex\\rock_d.xbt", rock, n_rock, 0);
+    arch_add(mod, "tex\\own_d.xbt", own, n_own, 0);
+    arch_add(mod, "tex\\own_d_mip0.xbt", own_top, n_own_top, 0);
+    arch_add(mod, "tex\\gone_d.xbt", gone, n_gone, 0);
+    arch_add(mod, "tex\\twin1.xbt", twin1, n_twin1, 0);
+    arch_add(mod, "tex\\twin2.xbt", twin2, n_twin2, 0);
+    arch_add(mod, "tex\\twin_mip0.xbt", twin_top, n_twin_top, 0);
+    arch_add(mod, "tex\\moved_d.xbt", moved_mod, n_moved_mod, 0);
+    arch_finish(mod);
+
+    arch_add(game, "tex\\boar_d_mip0.xbt", boar_top, n_boar_top, 0);
+    arch_add(game, "tex\\crab_d.xbt", crab_game, n_crab_game, 0);
+    arch_add(game, "tex\\crab_d_mip0.xbt", crab_top, n_crab_top, 0);
+    arch_add(game, "tex\\rock_d_mip0.xbt", rock_top, n_rock_top, 0);
+    arch_add(game, "tex\\moved_d.xbt", moved_game, n_moved_game, 0);
+    arch_add(game, "tex\\rock2_mip0.xbt", rock2_top, n_rock2_top, 0);
+    arch_finish(game);
+
+    /* compressed: the original rock texture, a second copy of the boar's top
+     * level, another version of the crab's and the crab texture itself */
+    arch_add(world, "tex\\rock_d.xbt", rock, n_rock, 1);
+    arch_add(world, "tex\\boar_d_mip0.xbt", boar_top, n_boar_top, 1);
+    arch_add(world, "tex\\crab_d_mip0.xbt", crab_top2, n_crab_top2, 1);
+    arch_add(world, "tex\\crab_d.xbt", crab_game, n_crab_game, 1);
+    arch_finish(world);
+
+    fats[0] = mod->index;
+    fats[1] = game->index;
+    fats[2] = world->index;
+    in.fats = fats;
+    in.count = 3;
+    in.read = arch_read;
+    in.ctx = g_arch;
+
+    n = tex_scan_shared(&in, names, 8, ids, 8, &n_ids, &stats);
+    CHECK(n == 4);
+    CHECK_EQ_U(stats.among_override, 2); /* boar, twins */
+    CHECK_EQ_U(stats.with_game, 2);      /* crab, moved (rock2) */
+    CHECK_EQ_U(stats.truncated, 0);
+    CHECK(n == 4 && names[0] < names[1] && names[1] < names[2] && names[2] < names[3]);
+    CHECK(tex_scan_contains(names, 4, dn_name_hash("tex\\boar_d_mip0.xbt")));
+    CHECK(tex_scan_contains(names, 4, dn_name_hash("tex\\crab_d_mip0.xbt")));
+    CHECK(tex_scan_contains(names, 4, dn_name_hash("tex\\twin_mip0.xbt")));
+    CHECK(tex_scan_contains(names, 4, dn_name_hash("tex\\rock2_mip0.xbt")));
+    CHECK(!tex_scan_contains(names, 4, dn_name_hash("tex\\rock_d_mip0.xbt")));
+    CHECK(!tex_scan_contains(names, 4, dn_name_hash("tex\\own_d_mip0.xbt")));
+    CHECK(!tex_scan_contains(names, 4, dn_name_hash("tex\\gone_d_mip0.xbt")));
+    /* the files themselves, every version of them, once */
+    CHECK_EQ_U(n_ids, 5);
+    CHECK(tex_scan_contains(ids, n_ids, engine_identity(boar_top, n_boar_top)));
+    CHECK(tex_scan_contains(ids, n_ids, engine_identity(crab_top, n_crab_top)));
+    CHECK(tex_scan_contains(ids, n_ids, engine_identity(crab_top2, n_crab_top2)));
+    CHECK(tex_scan_contains(ids, n_ids, engine_identity(twin_top, n_twin_top)));
+    CHECK(tex_scan_contains(ids, n_ids, engine_identity(rock2_top, n_rock2_top)));
+    CHECK(!tex_scan_contains(ids, n_ids, engine_identity(rock_top, n_rock_top)));
+    CHECK(!tex_scan_contains(ids, n_ids, engine_identity(own_top, n_own_top)));
+
+    /* lists that are too short say so instead of overflowing */
+    names[1] = 0x1234;
+    n = tex_scan_shared(&in, names, 1, ids, 8, &n_ids, &stats);
+    CHECK(n == 1 && names[1] == 0x1234);
+    CHECK_EQ_U(stats.truncated, 3);
+    ids[2] = 0x5678;
+    n = tex_scan_shared(&in, names, 8, ids, 2, &n_ids, &stats);
+    CHECK(n == 4 && n_ids == 2 && ids[2] == 0x5678);
+    CHECK_EQ_U(stats.truncated, 4); /* six copies in all, counted before duplicates go */
+    /* the names alone */
+    CHECK(tex_scan_shared(&in, names, 8, NULL, 0, NULL, NULL) == 4);
+
+    /* A game without a mod: every top level has one texture. */
+    {
+        static mem_archive plain[2];
+        plain[0] = *game;
+        plain[1] = *world;
+        fats[0] = game->index;
+        fats[1] = world->index;
+        in.count = 2;
+        in.ctx = plain;
+        n = tex_scan_shared(&in, names, 8, ids, 8, &n_ids, &stats);
+        CHECK(n == 0 && n_ids == 0);
+        CHECK_EQ_U(stats.among_override + stats.with_game, 0);
+        in.ctx = g_arch;
+        in.count = 3;
+        fats[1] = game->index;
+    }
+
+    /* no override archive, no input */
+    memset(&fats[0], 0, sizeof(fats[0]));
+    CHECK(tex_scan_shared(&in, names, 8, ids, 8, &n_ids, &stats) == 0);
+    CHECK(tex_scan_shared(NULL, names, 8, ids, 8, &n_ids, &stats) == 0);
+
+    free(mod->dat);
+    free(game->dat);
+    free(world->dat);
+}
+
 void suite_dunia(void)
 {
     RUN(test_name_hash);
@@ -524,4 +669,5 @@ void suite_dunia(void)
     RUN(test_xbt);
     RUN(test_identity);
     RUN(test_scan);
+    RUN(test_scan_shared);
 }

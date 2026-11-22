@@ -54,7 +54,33 @@ typedef struct ts_stats {
  * or -1 when memory ran out. stats may be NULL. */
 long tex_scan_stale(const ts_input *in, unsigned long long *ids, size_t cap, ts_stats *stats);
 
-/* Is id on a list produced by tex_scan_stale? */
+/* ---- top level files that several textures name --------------------------------
+ * In the game's own data each top level file is named by one texture. With a
+ * mod's archive on top that no longer holds, and the engine is not built for
+ * it (tex_link.h). A top level file counts as shared when
+ *   - two or more textures of the override archive name it, or
+ *   - one texture of the override archive names it that is not its original
+ *     owner (the game's copy of that texture, if there is one, names another
+ *     file or none), and the file exists in the game's archives - where its
+ *     original owner still names it too.
+ * That needs only the override archive's textures and single look-ups in the
+ * game's archives; on a real modded installation it finds exactly the files
+ * a comparison of every texture of the game finds. */
+typedef struct ts_shared_stats {
+    unsigned among_override; /* named by two or more of the override archive's textures */
+    unsigned with_game;      /* named by one of them and by a texture of the game */
+    unsigned truncated;      /* names or identities that did not fit */
+} ts_shared_stats;
+
+/* Fills names with the name hashes of the shared top level files (sorted,
+ * without duplicates) and ids with the identities (dn_top_identity) of every
+ * copy of those files in the archives (sorted, without duplicates; *id_count
+ * receives their number). Returns the number of names, or -1 when memory ran
+ * out. ids and stats may be NULL. */
+long tex_scan_shared(const ts_input *in, unsigned long long *names, size_t name_cap, unsigned long long *ids,
+                     size_t id_cap, size_t *id_count, ts_shared_stats *stats);
+
+/* Is id on a list produced by tex_scan_stale or tex_scan_shared? */
 int tex_scan_contains(const unsigned long long *ids, size_t count, unsigned long long id);
 
 #endif /* FC3PP_TEX_SCAN_H */
