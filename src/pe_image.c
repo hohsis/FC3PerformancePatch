@@ -3,6 +3,7 @@
  */
 #include "pe_image.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "ini.h"
@@ -82,7 +83,14 @@ void **pei_find_import(HMODULE mod, const char *dll, const char *func)
         slots = (IMAGE_THUNK_DATA32 *)(base + desc->FirstThunk);
         for (; names->u1.AddressOfData; ++names, ++slots) {
             const IMAGE_IMPORT_BY_NAME *ibn;
-            if (IMAGE_SNAP_BY_ORDINAL32(names->u1.Ordinal) || names->u1.AddressOfData >= image_size) {
+            if (IMAGE_SNAP_BY_ORDINAL32(names->u1.Ordinal)) {
+                /* "#2" asks for the import by ordinal 2 */
+                if (func[0] == '#' && IMAGE_ORDINAL32(names->u1.Ordinal) == (DWORD)atoi(func + 1)) {
+                    return (void **)&slots->u1.Function;
+                }
+                continue;
+            }
+            if (names->u1.AddressOfData >= image_size) {
                 continue;
             }
             ibn = (const IMAGE_IMPORT_BY_NAME *)(base + names->u1.AddressOfData);

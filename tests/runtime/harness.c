@@ -32,6 +32,7 @@ __declspec(dllimport) int fx_dxgi_open(void *window);
 __declspec(dllimport) int fx_dxgi_fullscreen(void);
 __declspec(dllimport) int fx_dxgi_set_fullscreen(int fullscreen);
 __declspec(dllimport) void *fx_dxgi_chain(void);
+__declspec(dllimport) int fx_dxgi_present(void);
 __declspec(dllimport) int fx_audio_probe(void);
 __declspec(dllimport) void *fx_tex_create(unsigned index, unsigned width, unsigned height, unsigned levels,
                                           unsigned dxgi_format);
@@ -851,6 +852,31 @@ static void scenario_textures(int guard_enabled, int scan_enabled)
     scenario_stale_textures(scan_enabled);
 }
 
+/* ---- the in-game menu's place in the frame ------------------------------------------
+ * The fake swap chain has no Direct3D device behind it, so nothing can be
+ * drawn; what must hold is that the game's frames go through untouched, with
+ * the menu closed, and with a menu that wants to open but cannot. */
+static void scenario_menu(void)
+{
+    typedef long (*presents_fn)(void);
+    HMODULE dxgi = GetModuleHandleA("dxgi.dll");
+    presents_fn presents = dxgi ? (presents_fn)(void *)GetProcAddress(dxgi, "fxdxgi_presents") : NULL;
+    int i;
+
+    CHECK(presents != NULL, "the loaded dxgi.dll is not the test fixture");
+    if (!presents) {
+        return;
+    }
+    CHECK(fx_dxgi_open((void *)(ULONG_PTR)0x00FC3001) == 0, "the engine fixture could not create its swap chain");
+    for (i = 0; i < 5; ++i) {
+        CHECK(fx_dxgi_present() == 0, "Present failed (frame %d)", i);
+    }
+    CHECK(presents() == 5, "%ld of 5 frames reached the swap chain", presents());
+    /* a second swap chain (window resized) is watched as well */
+    CHECK(fx_dxgi_open((void *)(ULONG_PTR)0x00FC3001) == 0, "could not create a second swap chain");
+    CHECK(fx_dxgi_present() == 0 && presents() == 6, "the second swap chain does not present");
+}
+
 int main(int argc, char **argv)
 {
     const char *scenario = argc > 1 ? argv[1] : "engine";
@@ -891,6 +917,9 @@ int main(int argc, char **argv)
             CHECK(GetModuleHandleA("XAudio2_7.dll") != NULL,
                   "XAudio2_7.dll was unloaded although the patch is meant to keep it loaded");
         }
+    } else if (strcmp(scenario, "menu") == 0 || strcmp(scenario, "menu-open") == 0 ||
+               strcmp(scenario, "menu-off") == 0) {
+        scenario_menu();
     } else if (strcmp(scenario, "textures") == 0) {
         scenario_textures(1, 1);
     } else if (strcmp(scenario, "textures-noscan") == 0) {

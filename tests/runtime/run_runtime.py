@@ -34,7 +34,7 @@ def ini(**kw):
         "enabled": 1, "log": 3, "fix": 1, "mode": "engine", "max_cores": 3, "smt": 0,
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
         "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0, "texguard": 1,
-        "texscan": 1,
+        "texscan": 1, "menu": 1, "menu_open": 0,
     }
     values.update(kw)
     return (
@@ -44,8 +44,10 @@ def ini(**kw):
         "[Memory]\nApplyLargeAddressAware={laa}\n"
         "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
         "[Textures]\nSkipMismatchedMip0={texguard}\nSkipReplacedTextureMip0={texscan}\n"
+        "[Menu]\nEnabled={menu}\nKey=F9\n"
         "[Audio]\nKeepXAudio2Loaded={keep_xaudio}\n"
         "[Debug]\nTraceCpuApi={trace}\nTraceAudio={trace_audio}\nSimulateAffinityMask={simulate}\n"
+        "MenuOpenAtStart={menu_open}\n"
     ).format(**values)
 
 
@@ -74,7 +76,17 @@ SCENARIOS = {
               ["FC3.dll: processor-enumeration loop signature not found", "relying on the affinity-mask hook"],
               ["ERROR"]),
     "dx9-engine": (HARNESS_DX9, ini(), ["forward-only"], True,
-                   ["FC3.dll:", "Mode=engine", "initialised", "FC3.dll: texture guard not available"], ["ERROR"]),
+                   ["FC3.dll:", "Mode=engine", "initialised", "FC3.dll: texture guard not available",
+                    "menu: not available with this renderer"], ["ERROR", "opens the settings menu"]),
+    "menu": (HARNESS, ini(), ["menu"], True,
+             ["menu: F9 opens the settings menu; on a gamepad, hold both thumbsticks in"],
+             ["ERROR", "menu: cannot draw"]),
+    # The menu wants to show but the swap chain has no Direct3D device: it
+    # says so once, gives up, and the frames keep coming.
+    "menu-open": (HARNESS, ini(menu_open=1), ["menu-open"], True,
+                  ["menu: cannot draw, the game is not drawing with Direct3D 11"], []),
+    "menu-off": (HARNESS, ini(menu=0, restore_fs=0), ["menu-off"], True,
+                 ["initialised"], ["menu:", "display: fullscreen guard", "ERROR"]),
     "textures": (HARNESS, ini(), ["textures"], True,
                  ["FC3_d3d11.dll: texture guard active ('release' build variant)",
                   "textures: left out a top mip level that does not fit its texture: the texture is 2048x2048 BC1, "

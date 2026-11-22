@@ -69,6 +69,9 @@ of the previous start is kept as `FC3PerformancePatch.previous.log`.
 
 ## Settings
 
+With the DX11 executable, press **F8** in the game (or hold both thumbsticks in on a gamepad) for a
+settings menu. It shows what the patch is doing and writes your changes to the INI file.
+
 `FC3PerformancePatch.ini` explains every setting. The ones most worth knowing:
 
 | Setting | Default | Meaning |
@@ -79,6 +82,7 @@ of the previous start is kept as `FC3PerformancePatch.previous.log`.
 | `[Display] RestoreFullscreenOnFocus` | `1` | Fullscreen after Alt+Tab (DX11) |
 | `[Textures] SkipMismatchedMip0` | `1` | Texture mod crash guard (DX11) |
 | `[Textures] SkipReplacedTextureMip0` | `1` | Keeps the game's original close-up texture from showing through a mod's replacement |
+| `[Menu] Key` | `F8` | The key that opens the in-game menu; `[Menu] Enabled=0` removes the menu |
 | `[General] Enabled` | `1` | `0` turns the whole patch off |
 
 ## Notes
@@ -89,6 +93,9 @@ of the previous start is kept as `FC3PerformancePatch.previous.log`.
 - **`D3D11MultithreadedRendering`** in `GamerProfile.xml`: leave it at `0` with the normal graphics
   driver; it is reported to cause flickering and crashes.
 - **Sound quality** cannot be improved by a patch: the shipped sounds are low-rate recordings.
+- **Multiplayer and co-op** are not restored. Ubisoft shut the game's online services down, and bringing
+  them back would mean replacing Ubisoft's launcher files and emulating its servers, which this project
+  does not do.
 - **Steam's "Verify integrity"** restores the `.exe`; the patch applies the 4 GB flag again on the next start.
 
 ## Status
@@ -102,12 +109,16 @@ Verified:
 - The texture crash: cause established from a crash dump; the fix is tested on the real engine DLLs of
   both games, and Far Cry 3 (DX11) was played with a large HD texture mod and the game's normal settings:
   it loads and runs where it crashed before, and the log shows the unfitting levels being left out.
+- The in-game menu draws correctly on a real Direct3D 11 device and leaves the device's state as it
+  found it (automated test at 720p and 4K).
 - The test suite passes on Windows, under Wine on Linux, and on an ARM64 machine under Wine with the FEX
   x86 emulator (the arrangement ARM handhelds use).
 
 Not verified:
 
 - Frame-rate or stutter improvements: not benchmarked.
+- The in-game menu inside the game itself: opening it, the game ignoring the keys meanwhile, overlays
+  such as Steam's or Ubisoft Connect's on top of it.
 - The texture guard with Blood Dragon or with the DX9 executable (not supported there).
 - `SkipReplacedTextureMip0` in play: it is tested on synthetic archives and finds the expected files in a
   real modded installation, but the result on screen was not yet checked.
@@ -123,7 +134,7 @@ Reports are welcome; please attach the log.
 CMake 3.20+ and either Visual Studio 2022 Build Tools (`.\build.ps1`) or MinGW-w64 i686
 (`cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-i686.cmake && cmake --build build`).
 `ctest --test-dir build` runs the tests, under Wine when cross-compiling. See
-[TECHNICAL.md](TECHNICAL.md#11-tests-and-their-limits) for what they cover.
+[TECHNICAL.md](TECHNICAL.md#12-tests-and-their-limits) for what they cover.
 
 ## License
 

@@ -16,6 +16,10 @@
  * the class was not recognised (the module is left untouched). */
 int texguard_install(HMODULE engine, const char *name, int scan_archives);
 
+/* Top mip levels added and left out so far (either may be NULL). Returns 0
+ * when the guard is not active. */
+int texguard_counts(long *added, long *left_out);
+
 /* Writes the counters to the log. Takes no locks. */
 void texguard_log_stats(void);
 

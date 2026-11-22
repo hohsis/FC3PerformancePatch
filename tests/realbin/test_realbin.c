@@ -462,6 +462,16 @@ static void test_engine_module(const wchar_t *dir, const wchar_t *name)
         CHECK(present, "the DX11 engine module does not import dxgi.dll!CreateDXGIFactory1");
         printf("    DXGI factory import: %s\n", present ? "found (fullscreen guard can attach)" : "MISSING");
     }
+    if (_wcsicmp(name, L"FC3_d3d11.dll") == 0 || _wcsicmp(name, L"FC3.dll") == 0) {
+        /* The in-game menu keeps the game from seeing its input through these two. */
+        int pad = pei_find_import(mod, "xinput1_3.dll", "#2") != NULL; /* XInputGetState, by ordinal */
+        int keys = pei_find_import(mod, "dinput8.dll", "DirectInput8Create") != NULL;
+        CHECK(pad, "the engine module does not import XInputGetState (ordinal 2) from xinput1_3.dll");
+        CHECK(keys, "the engine module does not import dinput8.dll!DirectInput8Create");
+        CHECK(pei_find_import(mod, "xinput1_3.dll", "#99") == NULL, "an ordinal that is not imported was found");
+        printf("    input imports: gamepad %s, keyboard and mouse %s\n", pad ? "found" : "MISSING",
+               keys ? "found" : "MISSING");
+    }
     {
         /* The texture guard wraps two methods of the DX11 renderer's texture
          * class, found by signature and through the class's virtual table. */

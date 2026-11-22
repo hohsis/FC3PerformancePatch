@@ -20,6 +20,7 @@
 
 /* IDXGISwapChain / IDXGIFactory slot numbers. */
 #define SLOT_FACTORY_CREATE_SWAP_CHAIN 10
+#define SLOT_CHAIN_PRESENT 8
 #define SLOT_CHAIN_SET_FULLSCREEN 10
 #define SLOT_CHAIN_GET_FULLSCREEN 11
 #define SLOT_CHAIN_GET_DESC 12
@@ -45,6 +46,7 @@ static volatile LONG g_set_calls;
 static volatile LONG g_get_calls;
 static volatile LONG g_fail_set;
 static volatile LONG g_chains_created;
+static volatile LONG g_presents;
 
 /* ---- IUnknown ---------------------------------------------------------------------- */
 
@@ -95,6 +97,38 @@ static HRESULT WINAPI fx_get_fullscreen_state(fx_object *self, BOOL *fullscreen,
     return S_OK;
 }
 
+/* Nothing is drawn; the frame is only counted. */
+static HRESULT WINAPI fx_present(fx_object *self, UINT sync_interval, UINT flags)
+{
+    (void)self;
+    (void)sync_interval;
+    (void)flags;
+    InterlockedIncrement(&g_presents);
+    return S_OK;
+}
+
+/* There is no Direct3D device behind the fake swap chain. */
+static HRESULT WINAPI fx_get_device(fx_object *self, const GUID *iid, void **device)
+{
+    (void)self;
+    (void)iid;
+    if (device) {
+        *device = NULL;
+    }
+    return FX_E_NOINTERFACE;
+}
+
+static HRESULT WINAPI fx_get_buffer(fx_object *self, UINT index, const GUID *iid, void **surface)
+{
+    (void)self;
+    (void)index;
+    (void)iid;
+    if (surface) {
+        *surface = NULL;
+    }
+    return FX_E_NOINTERFACE;
+}
+
 static HRESULT WINAPI fx_get_desc(fx_object *self, fx_swap_chain_desc *desc)
 {
     (void)self;
@@ -123,9 +157,9 @@ static void *const g_chain_vtbl[18] = {
     (void *)fx_add_ref,              /* 1 */
     (void *)fx_release,              /* 2 */
     NULL, NULL, NULL, NULL,          /* 3-6  IDXGIObject */
-    NULL,                            /* 7    GetDevice */
-    NULL,                            /* 8    Present */
-    NULL,                            /* 9    GetBuffer */
+    (void *)fx_get_device,           /* 7 */
+    (void *)fx_present,              /* 8 */
+    (void *)fx_get_buffer,           /* 9 */
     (void *)fx_set_fullscreen_state, /* 10 */
     (void *)fx_get_fullscreen_state, /* 11 */
     (void *)fx_get_desc,             /* 12 */
@@ -205,6 +239,11 @@ FXD_API int fxdxgi_state(void)
 FXD_API void fxdxgi_set_window(void *window)
 {
     g_window = (HWND)window;
+}
+
+FXD_API long fxdxgi_presents(void)
+{
+    return (long)g_presents;
 }
 
 FXD_API long fxdxgi_set_calls(void)

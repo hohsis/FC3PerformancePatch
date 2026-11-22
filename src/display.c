@@ -25,6 +25,7 @@
 
 /* Slot numbers in the IDXGIFactory and IDXGISwapChain virtual tables. */
 #define SLOT_FACTORY_CREATE_SWAP_CHAIN 10
+#define SLOT_CHAIN_PRESENT 8
 #define SLOT_CHAIN_GET_FULLSCREEN_STATE 11
 
 #define MAX_FACTORIES 4
@@ -34,6 +35,7 @@ typedef HRESULT(WINAPI *create_factory_fn)(REFIID riid, void **factory);
 typedef HRESULT(STDMETHODCALLTYPE *create_swap_chain_fn)(IDXGIFactory *self, IUnknown *device,
                                                         DXGI_SWAP_CHAIN_DESC *desc, IDXGISwapChain **chain);
 typedef HRESULT(STDMETHODCALLTYPE *get_fullscreen_fn)(IDXGISwapChain *self, BOOL *fullscreen, IDXGIOutput **target);
+typedef HRESULT(STDMETHODCALLTYPE *present_fn)(IDXGISwapChain *self, UINT sync_interval, UINT flags);
 
 typedef struct chain_entry {
     IDXGISwapChain *chain;
@@ -45,6 +47,9 @@ static create_factory_fn g_orig_create_factory;
 static create_factory_fn g_orig_create_factory1;
 static vt_hook g_factory_vtables[VT_MAX_TABLES];
 static vt_hook g_chain_vtables[VT_MAX_TABLES];
+static vt_hook g_present_vtables[VT_MAX_TABLES];
+static int g_guard_fullscreen;
+static display_present_fn g_on_present;
 static IDXGIFactory *g_factories[MAX_FACTORIES];
 static chain_entry g_chains[MAX_CHAINS];
 static unsigned g_next_chain;
@@ -225,15 +230,39 @@ static HRESULT STDMETHODCALLTYPE hook_get_fullscreen_state(IDXGISwapChain *self,
     return hr;
 }
 
+/* The engine presents a frame: the place to draw over it. */
+static HRESULT STDMETHODCALLTYPE hook_present(IDXGISwapChain *self, UINT sync_interval, UINT flags)
+{
+    present_fn original;
+    int ours;
+
+    AcquireSRWLockShared(&g_lock);
+    original = (present_fn)vt_original(g_present_vtables, self->lpVtbl);
+    ours = find_chain(self) != NULL;
+    ReleaseSRWLockShared(&g_lock);
+    if (!original) {
+        return E_FAIL;
+    }
+    if (ours && g_on_present && !(flags & DXGI_PRESENT_TEST)) {
+        g_on_present(self);
+    }
+    return original(self, sync_interval, flags);
+}
+
 static void track_chain(IDXGISwapChain *chain)
 {
     chain_entry *entry;
-    int hooked;
+    int guarded = 1, presenting = 1;
 
     AcquireSRWLockExclusive(&g_lock);
-    hooked = vt_hook_slot(g_chain_vtables, VT_OF(chain), SLOT_CHAIN_GET_FULLSCREEN_STATE,
-                          (void *)hook_get_fullscreen_state);
-    if (hooked) {
+    if (g_guard_fullscreen) {
+        guarded = vt_hook_slot(g_chain_vtables, VT_OF(chain), SLOT_CHAIN_GET_FULLSCREEN_STATE,
+                               (void *)hook_get_fullscreen_state);
+    }
+    if (g_on_present) {
+        presenting = vt_hook_slot(g_present_vtables, VT_OF(chain), SLOT_CHAIN_PRESENT, (void *)hook_present);
+    }
+    if (guarded || presenting) {
         /* A released swap chain's address may be reused by its successor. */
         entry = find_chain(chain);
         if (!entry) {
@@ -243,10 +272,15 @@ static void track_chain(IDXGISwapChain *chain)
         fs_guard_reset(&entry->guard);
     }
     ReleaseSRWLockExclusive(&g_lock);
-    if (hooked) {
-        LOGI("display: fullscreen guard attached to a swap chain of the game");
-    } else {
-        LOGE("display: could not attach the fullscreen guard to the swap chain");
+    if (g_guard_fullscreen) {
+        if (guarded) {
+            LOGI("display: fullscreen guard attached to a swap chain of the game");
+        } else {
+            LOGE("display: could not attach the fullscreen guard to the swap chain");
+        }
+    }
+    if (g_on_present && !presenting) {
+        LOGE("display: could not attach to the swap chain's Present; the in-game menu is unavailable");
     }
 }
 
@@ -330,9 +364,12 @@ static unsigned hook_factory_import(HMODULE engine, const char *name, void *hook
     return 1;
 }
 
-unsigned display_install_hooks(HMODULE engine)
+unsigned display_install_hooks(HMODULE engine, int guard_fullscreen, display_present_fn on_present)
 {
     unsigned hooks = 0;
+
+    g_guard_fullscreen = guard_fullscreen;
+    g_on_present = on_present;
 
     hooks += hook_factory_import(engine, "CreateDXGIFactory1", (void *)hook_create_factory1, &g_orig_create_factory1);
     hooks += hook_factory_import(engine, "CreateDXGIFactory", (void *)hook_create_factory, &g_orig_create_factory);

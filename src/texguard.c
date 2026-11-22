@@ -324,6 +324,18 @@ int texguard_install(HMODULE engine, const char *name, int scan_archives)
     return 1;
 }
 
+int texguard_counts(long *added, long *left_out)
+{
+    if (added) {
+        *added = (long)g_added;
+    }
+    if (left_out) {
+        *left_out = (long)(g_left_out[TEX_TOO_SMALL] + g_left_out[TEX_TOO_LARGE] + g_left_out[TEX_WRONG_FORMAT] +
+                           g_left_out[TEX_STALE]);
+    }
+    return g_vtbl != NULL;
+}
+
 void texguard_log_stats(void)
 {
     /* ("small" is a macro in the Windows headers.) */

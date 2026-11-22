@@ -248,6 +248,20 @@ FX_API int fx_dxgi_set_fullscreen(int fullscreen)
 #endif
 }
 
+/* The renderer shows a frame. 0 on success, <0 on error. */
+FX_API int fx_dxgi_present(void)
+{
+#ifndef FX_NO_DXGI
+    typedef HRESULT(WINAPI * fx_present_fn)(void *self, UINT sync_interval, UINT flags);
+    if (!g_fx_chain || FAILED(((fx_present_fn)fx_vtbl(g_fx_chain)[8])(g_fx_chain, 0, 0))) {
+        return -1;
+    }
+    return 0;
+#else
+    return -100;
+#endif
+}
+
 FX_API void *fx_dxgi_chain(void)
 {
 #ifndef FX_NO_DXGI

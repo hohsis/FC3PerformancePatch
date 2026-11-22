@@ -517,7 +517,39 @@ every texture, so an untouched texture that shares the same mip0 file with a rep
 runtime tests on archives built on disk, and on the real installation it returns exactly the files a
 separate reference implementation finds. **The effect on screen has not been checked yet.**
 
-## 10. Control Flow Guard
+## 10. The in-game menu (`[Menu]`)
+
+A settings menu that the patch draws itself, over the game's picture, with the DX11 renderer. The game's
+own menus are built from files in a proprietary Flash-like format ("Fire", `.feu`) for which no editing
+tools exist, so extending them was not an option.
+
+- **Where it draws.** The swap chains the engine creates are already tracked for the fullscreen guard;
+  their `Present` (slot 8) is wrapped the same way. Before the frame is shown, the menu is drawn onto the
+  back buffer with a small renderer of its own (`src/overlay.c`): one dynamic vertex buffer of coloured,
+  textured rectangles, two shaders compiled at run time with the D3D compiler DLL the game itself needs,
+  and a one-channel font texture rendered once with GDI from the system's UI font. Everything it sets on
+  the device context is saved first and restored afterwards, and it keeps no reference to the back buffer
+  between frames, so the engine can resize or recreate its swap chain at any time.
+- **What it is made of.** The entries, their behaviour (`src/menu_model.c`) and the layout
+  (`src/menu_draw.c`) are plain C without any system calls and are unit-tested; the layout scales with
+  the picture's height.
+- **Input.** The keys are read with `GetAsyncKeyState`, the gamepad with the game's own `XInputGetState`.
+  So that the game does not act on the same input, the engine's import of `XInputGetState` (by ordinal,
+  from `xinput1_3.dll`) and the keyboard and mouse devices it creates through `DirectInput8Create` are
+  wrapped: while the menu is open, and until the keys that closed it are up again, the engine is told
+  that nothing is pressed. DirectInput game controllers are left alone.
+- **Settings.** A change is written to the INI file with `WritePrivateProfileString`, which keeps the
+  file's comments. Most of the current settings are read once at start-up, so the menu says when a change
+  needs a restart.
+
+Status: the model and layout have unit tests; a test program draws the menu on a real Direct3D 11 device
+at 1280x720 and 3840x2160, checks the picture (panel, text, untouched remainder) and that render target,
+blend, rasteriser, viewport and topology are as it left them; the runtime tests cover the `Present` hook
+on a stand-in swap chain, including a menu that cannot draw. **It has not been used inside the game
+yet**, and nothing is known about how it behaves under the Steam or Ubisoft Connect overlays, with DXVK,
+or in exclusive fullscreen. It does not exist for the DX9 executables.
+
+## 11. Control Flow Guard
 
 None of the game binaries are built with CFG (`IMAGE_DLLCHARACTERISTICS_GUARD_CF` is clear in all of them).
 Disabling CFG per executable in Windows Exploit Protection is a frequently repeated community fix for long
@@ -525,14 +557,15 @@ freezes in this and other games; the evidence is anecdotal and no mechanism was 
 patch does not change it: it would lower a security mitigation for the named executable on the strength
 of anecdote.
 
-## 11. Tests and their limits
+## 12. Tests and their limits
 
 | Layer | Method |
 |---|---|
 | Logic | Unit tests for every pure module; the four loop variants are executed as machine code before and after patching |
 | Real engine code | The game's own function, called in isolation from the user's DLLs (section 2); the texture guard installed on the game's real texture class table and called through it (section 9) |
-| Process integration | A 32-bit host with stand-in modules named like the engine's, in 21 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
+| Process integration | A 32-bit host with stand-in modules named like the engine's, in 24 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
+| Rendering | The in-game menu drawn on a real Direct3D 11 device, the picture and the restored device state checked |
 | Other processors | The same test suite on an ARM64 runner, the 32-bit test programs translated by FEX inside ARM64 Wine |
 | Privacy | Sources, git history and binaries are scanned for paths, account names, addresses and IDs |
 

@@ -60,5 +60,6 @@ void suite_pe_image(void);
 void suite_fs_guard(void);
 void suite_tex_rule(void);
 void suite_dunia(void);
+void suite_menu(void);
 
 #endif /* FC3PP_TEST_H */

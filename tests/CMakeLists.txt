@@ -8,7 +8,7 @@ add_executable(fc3pp_unit
     unit/main.c unit/dummy_pe.c
     unit/test_ini.c unit/test_sigscan.c unit/test_pe_file.c unit/test_cpu.c
     unit/test_patches.c unit/test_pe_image.c unit/test_fs_guard.c unit/test_tex_rule.c
-    unit/test_dunia.c)
+    unit/test_dunia.c unit/test_menu.c)
 target_link_libraries(fc3pp_unit PRIVATE fc3pp_win)
 add_test(NAME unit COMMAND fc3pp_unit)
 
@@ -23,6 +23,13 @@ else()
 endif()
 add_test(NAME real_game_binaries COMMAND fc3pp_realbin)
 set_tests_properties(real_game_binaries PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+
+# ---- the in-game menu drawn on a real Direct3D 11 device ---------------------------
+# Skipped (exit code 77) where there is no Direct3D 11 or no window system.
+add_executable(fc3pp_overlay_shot overlay/overlay_shot.c)
+target_link_libraries(fc3pp_overlay_shot PRIVATE fc3pp_win d3d11)
+add_test(NAME menu_rendering COMMAND fc3pp_overlay_shot)
+set_tests_properties(menu_rendering PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
 
 # ---- runtime smoke tests: the proxy inside a 32-bit host -------------------------
 # Everything lands in one folder so the host finds its fixtures.

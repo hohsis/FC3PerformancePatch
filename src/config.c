@@ -8,6 +8,7 @@
 #include "cpu_topology.h"
 #include "fc3pp.h"
 #include "ini.h"
+#include "menu_model.h"
 
 void config_defaults(fc3pp_config *cfg)
 {
@@ -29,6 +30,8 @@ void config_defaults(fc3pp_config *cfg)
     cfg->keep_xaudio2_loaded = 1;
     cfg->texture_guard = 1;
     cfg->texture_scan = 1;
+    cfg->menu_enabled = 1;
+    cfg->menu_key = 0x77; /* F8 */
 }
 
 const char *config_mode_name(cpu_mode mode)
@@ -112,10 +115,24 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
     cfg->texture_guard = ini_get_bool(&doc, "Textures", "SkipMismatchedMip0", cfg->texture_guard);
     cfg->texture_scan = ini_get_bool(&doc, "Textures", "SkipReplacedTextureMip0", cfg->texture_scan);
 
+    cfg->menu_enabled = ini_get_bool(&doc, "Menu", "Enabled", cfg->menu_enabled);
+    {
+        const char *key = ini_get(&doc, "Menu", "Key");
+        if (key && *key) {
+            unsigned vk = mm_key_from_name(key);
+            if (vk) {
+                cfg->menu_key = vk;
+            } else {
+                cfg->menu_key_invalid = 1;
+            }
+        }
+    }
+
     cfg->keep_xaudio2_loaded = ini_get_bool(&doc, "Audio", "KeepXAudio2Loaded", cfg->keep_xaudio2_loaded);
 
     cfg->trace_cpu_api = ini_get_bool(&doc, "Debug", "TraceCpuApi", cfg->trace_cpu_api);
     cfg->trace_audio = ini_get_bool(&doc, "Debug", "TraceAudio", cfg->trace_audio);
+    cfg->menu_open_at_start = ini_get_bool(&doc, "Debug", "MenuOpenAtStart", cfg->menu_open_at_start);
     cfg->simulate_affinity_mask =
         ini_get_uint(&doc, "Debug", "SimulateAffinityMask", cfg->simulate_affinity_mask) & 0xFFFFFFFFul;
 

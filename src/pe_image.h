@@ -21,7 +21,8 @@ int pei_valid(HMODULE mod);
 unsigned pei_sections(HMODULE mod, pei_section *out, unsigned max);
 
 /* Returns the address of the import address table slot for dll!func, or NULL
- * when the module does not import it by name. */
+ * when the module does not import it. func is a name, or "#<number>" for an
+ * import by ordinal. */
 void **pei_find_import(HMODULE mod, const char *dll, const char *func);
 
 /* Replaces an import. *previous (optional) receives the old slot value.

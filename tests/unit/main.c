@@ -18,7 +18,7 @@ int main(int argc, char **argv)
         {"ini", suite_ini},         {"config", suite_config},   {"sigscan", suite_sigscan},
         {"pe_file", suite_pe_file}, {"cpu", suite_cpu},         {"patches", suite_patches},
         {"pe_image", suite_pe_image}, {"fs_guard", suite_fs_guard}, {"tex_rule", suite_tex_rule},
-        {"dunia", suite_dunia},
+        {"dunia", suite_dunia},       {"menu", suite_menu},
     };
     size_t i;
     int ran = 0;

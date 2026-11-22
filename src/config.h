@@ -43,12 +43,18 @@ typedef struct fc3pp_config {
     int texture_guard; /* leave out top mip levels that do not fit their texture (DX11) */
     int texture_scan;  /* ... and those made for a texture a mod has replaced */
 
+    /* [Menu] */
+    int menu_enabled;       /* the in-game settings menu (DX11) */
+    unsigned menu_key;      /* virtual-key code that opens it */
+    int menu_key_invalid;   /* the Key= value was not understood */
+
     /* [Audio] */
     int keep_xaudio2_loaded; /* pin XAudio2_7.dll (documented premature-unload defect) */
 
     /* [Debug] */
     int trace_cpu_api;
     int trace_audio;
+    int menu_open_at_start; /* testing aid */
     unsigned long simulate_affinity_mask;
 
     size_t malformed_lines;

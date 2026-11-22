@@ -18,6 +18,9 @@ default to on. Copy the new INI too if you want them listed.
   leaves out only the levels that do not fit (`[Textures] SkipMismatchedMip0`), and the original
   close-up textures of textures a mod has repainted, which would otherwise show through a few metres
   ahead of you (`[Textures] SkipReplacedTextureMip0`).
+- **A settings menu in the game (DX11).** F8, or both thumbsticks held in on a gamepad, opens a menu
+  drawn by the patch: what it is doing, and its settings, which are saved to the INI file. The game
+  does not see the keys used in it. `[Menu] Key` changes the key, `[Menu] Enabled=0` removes it.
 - **ARM handhelds (Wine with FEX).** Fast and slow cores are told apart there (Wine does not report
   them), and the patch copes with launchers that move the game to other processors after it has
   started. The test suite passes under FEX; the game itself has not been tried on such a device yet.

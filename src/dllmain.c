@@ -21,6 +21,7 @@
 #include "ini.h"
 #include "laa.h"
 #include "log.h"
+#include "menu.h"
 #include "patches.h"
 #include "pe_image.h"
 #include "proxy.h"
@@ -145,8 +146,10 @@ static void apply_laa(const wchar_t *host_path)
 
     if (laa_process_is_aware()) {
         LOGI("memory: process is large-address-aware (4 GB address space)");
+        menu_set_status(MENU_STATUS_MEMORY, "4 GB address space");
         return;
     }
+    menu_set_status(MENU_STATUS_MEMORY, "2 GB (4 GB after a restart)");
     if (!g_cfg.apply_large_address_aware) {
         LOGI("memory: executable is NOT large-address-aware and ApplyLargeAddressAware=0; "
              "the game is limited to 2 GB of address space");
@@ -273,9 +276,17 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
         if (g_cfg.sleep_zero_yield || g_cfg.log_level >= LOG_DEBUG) {
             hooks += shim_install_sleep_hook(mod);
         }
-        if (g_cfg.restore_fullscreen) {
-            hooks += display_install_hooks(mod);
+        if (g_cfg.restore_fullscreen || g_cfg.menu_enabled) {
+            unsigned dxgi = display_install_hooks(mod, g_cfg.restore_fullscreen,
+                                                  g_cfg.menu_enabled ? menu_on_present : NULL);
+            if (!dxgi && !seen) {
+                menu_set_unavailable(); /* no DXGI: the DX9 renderer */
+            }
+            hooks += dxgi;
+        } else {
+            menu_set_unavailable();
         }
+        hooks += menu_install_hooks(mod);
         hooks += audio_install(mod, &g_cfg);
         if (g_cfg.texture_guard) {
             texguard_install(mod, name, g_cfg.texture_scan);
@@ -364,6 +375,11 @@ static void setup_cpu(void)
     LOGI("cpu: Mode=%s - engine sees %u logical processor%s on %u core%s (real processors %s, mask 0x%08lX)",
          config_mode_name(g_cfg.mode), sel.count, sel.count == 1 ? "" : "s", sel.cores, sel.cores == 1 ? "" : "s",
          list, sel.real_mask);
+    {
+        char status[96];
+        snprintf(status, sizeof(status), "%u of %u cores, %u threads", sel.cores, topo.core_count, sel.count);
+        menu_set_status(MENU_STATUS_PROCESSOR, status);
+    }
 
     shim_configure(SHIM_VIRTUALIZE, &topo, &sel, &g_cfg);
 
@@ -441,6 +457,11 @@ static void fc3pp_init(HINSTANCE self)
     }
 
     g_active = 1;
+    if (g_cfg.menu_key_invalid) {
+        LOGE("config: the [Menu] Key= value is not a key name this patch knows (F1 to F12, Home, End, Insert, "
+             "Delete, Pause, ScrollLock, PageUp, PageDown, Tab); using F8");
+    }
+    menu_init(&g_cfg, ini_path);
     apply_laa(host);
     apply_timer_resolution();
     /* user32 is a static import of this DLL, hence already initialised. */

@@ -13,9 +13,14 @@
  * first window. */
 void display_apply_process_settings(const fc3pp_config *cfg);
 
+/* Called from the engine's Present, before the frame is shown. */
+typedef void (*display_present_fn)(void *swap_chain);
+
 /* Hooks the engine module's DXGI factory import so that the swap chains it
- * creates can be watched (see fs_guard.h). Returns the number of imports
- * hooked; 0 for the DX9 engine module, which does not use DXGI. */
-unsigned display_install_hooks(HMODULE engine);
+ * creates can be watched: with guard_fullscreen for the fullscreen guard (see
+ * fs_guard.h), with on_present to be called for every frame they present.
+ * Returns the number of imports hooked; 0 for the DX9 engine module, which
+ * does not use DXGI. */
+unsigned display_install_hooks(HMODULE engine, int guard_fullscreen, display_present_fn on_present);
 
 #endif /* FC3PP_DISPLAY_H */
