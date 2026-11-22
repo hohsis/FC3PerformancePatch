@@ -27,6 +27,7 @@
 #include "patches.h"
 #include "pe_image.h"
 #include "proxy.h"
+#include "tex_stale.h"
 #include "texguard.h"
 #include "texlink.h"
 
@@ -294,11 +295,12 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
         hooks += gfx_profile_install(mod, g_cfg.draw_distance);
         hooks += audio_install(mod, &g_cfg);
         if (g_cfg.texture_shared) {
-            texlink_install(mod, name); /* first: it tells the archive scan */
+            texlink_install(mod, name);
         }
         if (g_cfg.texture_guard) {
             texguard_install(mod, name, g_cfg.texture_scan);
         }
+        tex_stale_start(); /* the archive scan, for whichever of the two asked for it */
     }
     if (!seen || applied) {
         LOGI("%s: %u import hook%s installed", name, hooks, hooks == 1 ? "" : "s");

@@ -257,8 +257,7 @@ int texlink_install(HMODULE engine, const char *name)
         return 0;
     }
     g_slots = table;
-    tex_stale_shared_handled();
-    tex_stale_start();
+    tex_stale_shared_handled(); /* the caller starts the archive scan */
     LOGI("%s: top mip level files that more than one texture names will be left unloaded ('%s' build variant)", name,
          site.variant);
     return 1;

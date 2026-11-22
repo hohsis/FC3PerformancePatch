@@ -8,7 +8,8 @@
 #include <windows.h>
 
 /* Finds the top level resource class in an engine module and wraps its Load
- * and Unload methods. Returns 1 when installed. Says so in the log. */
+ * and Unload methods. Returns 1 when installed. Says so in the log. The list
+ * of files comes from the archive scan: call tex_stale_start afterwards. */
 int texlink_install(HMODULE engine, const char *name);
 
 /* Top level files left unloaded so far; returns 0 when not installed. */

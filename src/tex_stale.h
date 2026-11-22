@@ -23,8 +23,13 @@ long tex_stale_scan_folder_shared(const wchar_t *data_dir, unsigned long long *n
                                   unsigned long long *ids, size_t id_cap, size_t *id_count,
                                   ts_shared_stats *stats);
 
+/* What the scan is wanted for. Call before tex_stale_start. */
+void tex_stale_want_replaced(void); /* original top levels of replaced textures (tex_stale_check) */
+void tex_stale_shared_handled(void); /* something keeps the engine away from shared top level files */
+
 /* Starts scanning "<game>\data_win32" (the folder next to the one the game
- * executable is in). Returns at once; does nothing when called again. */
+ * executable is in) if anything asked for it. Returns at once; does nothing
+ * when called again. */
 void tex_stale_start(void);
 
 /* Non-zero when the file the engine holds (buffer: start of the .xbt file,
@@ -39,10 +44,6 @@ int tex_stale_shared_name(unsigned long long name_hash);
 /* The same question for a top level file the engine holds (file: the whole
  * .xbt file, size: its length), answered from its content. */
 int tex_stale_shared_file(const void *file, unsigned size);
-
-/* Call before tex_stale_start when something keeps the engine away from
- * shared top level files: the scan's log line then says so. */
-void tex_stale_shared_handled(void);
 
 /* Number of shared top level files the scan found; -1 while it is running. */
 long tex_stale_shared_count(void);

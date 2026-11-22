@@ -31,7 +31,7 @@ static volatile LONG g_stale_count; /* valid once g_done is signalled */
 static unsigned long long g_shared_names[MAX_SHARED];   /* top level files several textures name */
 static unsigned long long g_shared_ids[MAX_SHARED * 2]; /* the same files by content */
 static volatile LONG g_shared_name_count, g_shared_id_count;
-static volatile LONG g_shared_handled;
+static volatile LONG g_shared_handled, g_want_replaced;
 static HANDLE g_done;
 static volatile LONG g_started;
 static volatile LONG g_waited;
@@ -248,7 +248,9 @@ static DWORD WINAPI scan_thread(LPVOID unused)
     }
     if (slash) {
         wcscpy(slash, L"\\data_win32");
-        count = tex_stale_scan_folder(dir, g_stale, MAX_STALE, &stats, &archives);
+        if (g_want_replaced) {
+            count = tex_stale_scan_folder(dir, g_stale, MAX_STALE, &stats, &archives);
+        }
         n_shared = tex_stale_scan_folder_shared(dir, g_shared_names, MAX_SHARED, g_shared_ids, MAX_SHARED * 2,
                                                 &shared_ids, &shared);
     } else {
@@ -263,7 +265,9 @@ static DWORD WINAPI scan_thread(LPVOID unused)
         LOGE("textures: not enough memory to check the patch archive for replaced textures");
         count = 0;
     }
-    if (stats.linked == stats.own_top) {
+    if (!g_want_replaced) {
+        /* only the shared files were asked for */
+    } else if (stats.linked == stats.own_top) {
         LOGD("textures: the patch archive replaces no texture that has a separate top mip level "
              "(%u archives read in %lu ms)",
              archives, (unsigned long)(GetTickCount() - started));
@@ -302,6 +306,9 @@ void tex_stale_start(void)
 {
     HANDLE thread;
 
+    if (!g_want_replaced && !g_shared_handled) {
+        return; /* nobody asked */
+    }
     if (InterlockedExchange(&g_started, 1)) {
         return;
     }
@@ -358,6 +365,11 @@ static int scan_done(void)
 void tex_stale_shared_handled(void)
 {
     InterlockedExchange(&g_shared_handled, 1);
+}
+
+void tex_stale_want_replaced(void)
+{
+    InterlockedExchange(&g_want_replaced, 1);
 }
 
 long tex_stale_shared_count(void)

@@ -316,7 +316,7 @@ int texguard_install(HMODULE engine, const char *name, int scan_archives)
     g_slot_add = slot_add;
     g_check_stale = scan_archives;
     if (scan_archives) {
-        tex_stale_start();
+        tex_stale_want_replaced(); /* the caller starts the archive scan */
     }
     LOGI("%s: texture guard active ('%s' build variant): top mip levels that do not fit their texture are left out "
          "instead of crashing the game",
