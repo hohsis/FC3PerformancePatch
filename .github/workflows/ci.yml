@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows (MSVC, 32-bit)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure
+        run: cmake -S . -B build -A Win32
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: OPSEC audit of the whole history
+        run: python tools/opsec_audit.py --history --tree
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src/fc3pp.h -Pattern 'FC3PP_VERSION "([^"]+)"').Matches[0].Groups[1].Value
+          $zip = "FC3PerformancePatch-$version.zip"
+          Compress-Archive -Path build/package/FC3PerformancePatch/* -DestinationPath $zip
+          (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() + "  $zip" | Out-File -Encoding ascii "$zip.sha256"
+          Get-Content "$zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FC3PerformancePatch
+          path: |
+            FC3PerformancePatch-*.zip
+            FC3PerformancePatch-*.zip.sha256
+          if-no-files-found: error
+
+  linux:
+    name: Linux (MinGW-w64 cross build, tests under Wine)
+    runs-on: ubuntu-24.04
+    env:
+      WINEDEBUG: -all
+      WINEDLLOVERRIDES: mscoree=;mshtml=
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install the cross compiler, Wine and shellcheck
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-i686 wine wine32:i386 shellcheck
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-i686.cmake -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Prepare the Wine prefix
+        run: wine cmd /c ver
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Shellcheck
+        run: shellcheck -S warning scripts/install.sh scripts/uninstall.sh tests/install/test_install.sh tools/hooks/pre-commit tools/hooks/pre-push
+
+  release:
+    name: Publish release
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: FC3PerformancePatch
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" FC3PerformancePatch-*.zip FC3PerformancePatch-*.zip.sha256 \
+            --title "FC3PerformancePatch ${GITHUB_REF_NAME#v}" \
+            --notes-file docs/RELEASE_NOTES.md
