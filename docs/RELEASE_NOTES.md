@@ -21,6 +21,8 @@ default to on, the two extras to off. Copy the new INI too if you want them list
 - **A settings menu in the game (DX11).** F8, or both thumbsticks held in on a gamepad, opens a menu
   drawn by the patch: what it is doing, and its settings, which are saved to the INI file. The game
   does not see the keys used in it. `[Menu] Key` changes the key, `[Menu] Enabled=0` removes it.
+  It works with a controller alone (Steam Big Picture, Steam Deck): D-pad or left stick, A, B;
+  `[Menu] PadButtons` sets the opening combination and `[Menu] Scale` a larger text size.
 - **Two extras, off by default** because they have not been confirmed in play yet; switch them on in
   the in-game menu or the INI file:
   - *Gamepad or keyboard by use* (`[Controls] AutoSwitchInput=1`): the game changes between gamepad

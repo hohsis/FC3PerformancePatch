@@ -35,6 +35,7 @@ def ini(**kw):
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
         "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0, "texguard": 1,
         "texscan": 1, "menu": 1, "menu_open": 0, "autoswitch": 0, "focus": 0, "distance": 0,
+        "pad": "L3+R3",
     }
     values.update(kw)
     return (
@@ -44,7 +45,7 @@ def ini(**kw):
         "[Memory]\nApplyLargeAddressAware={laa}\n"
         "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
         "[Textures]\nSkipMismatchedMip0={texguard}\nSkipReplacedTextureMip0={texscan}\n"
-        "[Menu]\nEnabled={menu}\nKey=F9\n"
+        "[Menu]\nEnabled={menu}\nKey=F9\nPadButtons={pad}\n"
         "[Controls]\nAutoSwitchInput={autoswitch}\n"
         "[Graphics]\nDrawDistance={distance}\n"
         "[Audio]\nKeepXAudio2Loaded={keep_xaudio}\n"
@@ -83,6 +84,14 @@ SCENARIOS = {
     "menu": (HARNESS, ini(), ["menu"], True,
              ["menu: F9 opens the settings menu; on a gamepad, hold both thumbsticks in"],
              ["ERROR", "menu: cannot draw"]),
+    "menu-pad": (HARNESS, ini(pad="Back+Start"), ["menu"], True,
+                 ["menu: F9 opens the settings menu; on a gamepad, hold the buttons set in the INI file"],
+                 ["ERROR", "thumbsticks"]),
+    "menu-nopad": (HARNESS, ini(pad="None"), ["menu"], True,
+                   ["menu: F9 opens the settings menu"], ["ERROR", "on a gamepad"]),
+    "menu-badpad": (HARNESS, ini(pad="Start"), ["menu"], True,
+                    ["config: the [Menu] PadButtons= value is not a combination of two or more gamepad buttons",
+                     "menu: F9 opens the settings menu; on a gamepad, hold both thumbsticks in"], []),
     # The menu wants to show but the swap chain has no Direct3D device: it
     # says so once, gives up, and the frames keep coming.
     "menu-open": (HARNESS, ini(menu_open=1), ["menu-open"], True,
@@ -102,9 +111,9 @@ SCENARIOS = {
                    "input: the game's gamepad and keyboard/mouse reads go through the patch (2 of 2 hooks)"],
                   ["ERROR", "controls:", "cannot be held back"]),
     # No menu and no switching: the game's input is not hooked at all.
-    "input-none": (HARNESS, ini(menu=0, restore_fs=0), ["input-off"], True,
+    "input-none": (HARNESS, ini(menu=0, restore_fs=0), ["input-nomenu"], True,
                    ["initialised"], ["ERROR", "controls:", "menu:", "input: the game"]),
-    "input-dx9": (HARNESS_DX9, ini(autoswitch=1, focus=1), ["input"], True,
+    "input-dx9": (HARNESS_DX9, ini(autoswitch=1, focus=1), ["input-switch-nomenu"], True,
                   ["FC3.dll: input-mode switch found", "menu: not available with this renderer",
                    "controls: the input mode was switched 9 times"],
                   ["ERROR", "opens the settings menu"]),

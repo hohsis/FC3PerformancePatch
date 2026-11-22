@@ -77,8 +77,14 @@ of the previous start is kept as `FC3PerformancePatch.previous.log`.
 
 ## Settings
 
-With the DX11 executable, press **F8** in the game (or hold both thumbsticks in on a gamepad) for a
-settings menu. It shows what the patch is doing and writes your changes to the INI file.
+With the DX11 executable, press **F8** in the game for a settings menu. It shows what the patch is doing
+and writes your changes to the INI file.
+
+**With a controller** (Steam Big Picture, Steam Deck, handhelds): hold both thumbsticks pressed in for a
+moment to open or close it, move with the D-pad or left stick, **A** to switch, **B** to close. No
+keyboard is needed. The text can be made larger under *This menu > Size*. The button combination is
+`[Menu] PadButtons`; with Steam Input you can also bind a spare button to F8. If Steam offers a choice
+of versions at launch, pick the DirectX 11 one: the menu does not exist in the DirectX 9 version.
 
 `FC3PerformancePatch.ini` explains every setting. The ones most worth knowing:
 
@@ -93,6 +99,8 @@ settings menu. It shows what the patch is doing and writes your changes to the I
 | `[Controls] AutoSwitchInput` | `0` | `1` = gamepad or keyboard/mouse mode follows what you use |
 | `[Graphics] DrawDistance` | `0` | `1` = far, `2` = very far |
 | `[Menu] Key` | `F8` | The key that opens the in-game menu; `[Menu] Enabled=0` removes the menu |
+| `[Menu] PadButtons` | `L3+R3` | Gamepad buttons that open the menu when held together; `None` = keyboard only |
+| `[Menu] Scale` | `100` | Size of the menu in percent, up to `200` |
 | `[General] Enabled` | `1` | `0` turns the whole patch off |
 
 ## Notes
@@ -120,7 +128,9 @@ Verified:
   both games, and Far Cry 3 (DX11) was played with a large HD texture mod and the game's normal settings:
   it loads and runs where it crashed before, and the log shows the unfitting levels being left out.
 - The in-game menu draws correctly on a real Direct3D 11 device and leaves the device's state as it
-  found it (automated test at 720p and 4K).
+  found it (automated test at 720p and 4K), and can be operated with a gamepad alone: an automated
+  test opens it with the button combination, changes settings and closes it again, with a stand-in
+  gamepad.
 - The two extras as far as they can be without playing: the code they rely on is found in the engine
   DLLs of both games (DX9 and DX11), the game's render settings are read from the real archives, and
   both run in a test program against stand-in input devices and a stand-in profile.
@@ -131,7 +141,8 @@ Not verified:
 
 - Frame-rate or stutter improvements: not benchmarked.
 - The in-game menu inside the game itself: opening it, the game ignoring the keys meanwhile, overlays
-  such as Steam's or Ubisoft Connect's on top of it.
+  such as Steam's or Ubisoft Connect's on top of it. Nor with a real controller, in Steam Big Picture
+  or on SteamOS.
 - **Gamepad or keyboard by use** and **Draw distance** in play. Neither has been tried in the game:
   whether the game switches cleanly in every screen, and whether it takes the longer distances and
   what they cost, is not known yet. That is why both are off by default.

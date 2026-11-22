@@ -172,6 +172,8 @@ static void test_config_defaults(void)
     CHECK(c.texture_scan == 1);
     CHECK(c.menu_enabled == 1);
     CHECK(c.menu_key == 0x77); /* F8 */
+    CHECK_EQ_U(c.menu_pad, 0x00C0); /* both thumbsticks pressed in */
+    CHECK(c.menu_pad_invalid == 0 && c.menu_scale == 100);
     CHECK(c.trace_audio == 0); /* diagnostics default to off */
     CHECK(c.auto_switch_input == 0); /* not yet confirmed in play: opt-in */
     CHECK(c.draw_distance == 0 && c.draw_distance_invalid == 0);
@@ -184,7 +186,7 @@ static void test_config_values(void)
                                "[Memory]\nApplyLargeAddressAware=off\n[Debug]\nSimulateAffinityMask=0xFFFFFFFF\n"
                                "[Display]\nRestoreFullscreenOnFocus=0\nHighDpiAware=no\nDisableWindowGhosting=off\n"
                                "[Audio]\nKeepXAudio2Loaded=0\n[Debug]\nTraceAudio=1\n"
-                               "[Textures]\nSkipMismatchedMip0=0\nSkipReplacedTextureMip0=0\n[Menu]\nEnabled=0\nKey=Home\n"
+                               "[Textures]\nSkipMismatchedMip0=0\nSkipReplacedTextureMip0=0\n[Menu]\nEnabled=0\nKey=Home\nPadButtons=Back+Start\nScale=150\n"
                                "[Controls]\nAutoSwitchInput=1\n[Graphics]\nDrawDistance=2\n";
     fc3pp_config c;
     CHECK(config_load_text(&c, text, sizeof(text) - 1) == 0);
@@ -207,6 +209,8 @@ static void test_config_values(void)
     CHECK(c.texture_scan == 0);
     CHECK(c.menu_enabled == 0);
     CHECK(c.menu_key == 0x24 && c.menu_key_invalid == 0);
+    CHECK_EQ_U(c.menu_pad, 0x0030);
+    CHECK(c.menu_pad_invalid == 0 && c.menu_scale == 150);
     CHECK(c.trace_audio == 1);
     CHECK(c.auto_switch_input == 1);
     CHECK(c.draw_distance == 2 && c.draw_distance_invalid == 0);
@@ -214,7 +218,8 @@ static void test_config_values(void)
 
 static void test_config_bad_values(void)
 {
-    static const char text[] = "[CPU]\nMode=banana\nCores=1,x\nMaxCores=lots\n[Graphics]\nDrawDistance=3\n";
+    static const char text[] = "[CPU]\nMode=banana\nCores=1,x\nMaxCores=lots\n[Graphics]\nDrawDistance=3\n[Menu]\nPadButtons=A\nScale=900\n";
+    static const char no_pad[] = "[Menu]\nPadButtons=None\nScale=10\n";
     static const char far_name[] = "[Graphics]\nDrawDistance=Far\n";
     static const char very_far[] = "[Graphics]\nDrawDistance=VeryFar\n";
     static const char original[] = "[Graphics]\nDrawDistance=original\n";
@@ -225,6 +230,10 @@ static void test_config_bad_values(void)
     CHECK_EQ_U(c.cores_mask, 0);
     CHECK(c.max_cores == 6);
     CHECK(c.draw_distance == 0 && c.draw_distance_invalid == 1); /* out of range: the original distances */
+    CHECK(c.menu_pad == 0x00C0 && c.menu_pad_invalid == 1);      /* one button: the default stays */
+    CHECK(c.menu_scale == 200);                                  /* clamped */
+    CHECK(config_load_text(&c, no_pad, sizeof(no_pad) - 1) == 0 && c.menu_pad == 0 && c.menu_pad_invalid == 0 &&
+          c.menu_scale == 100);
     CHECK(config_load_text(&c, far_name, sizeof(far_name) - 1) == 0 && c.draw_distance == 1);
     CHECK(config_load_text(&c, very_far, sizeof(very_far) - 1) == 0 && c.draw_distance == 2);
     CHECK(config_load_text(&c, original, sizeof(original) - 1) == 0 && c.draw_distance == 0 &&

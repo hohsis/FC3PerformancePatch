@@ -28,8 +28,12 @@ set_tests_properties(real_game_binaries PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 3
 # Skipped (exit code 77) where there is no Direct3D 11 or no window system.
 add_executable(fc3pp_overlay_shot overlay/overlay_shot.c)
 target_link_libraries(fc3pp_overlay_shot PRIVATE fc3pp_win d3d11)
-add_test(NAME menu_rendering COMMAND fc3pp_overlay_shot)
-set_tests_properties(menu_rendering PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+# With a stand-in xinput1_3.dll (built below) it is then operated with a gamepad alone.
+add_test(NAME menu_rendering COMMAND fc3pp_overlay_shot --pad "$<TARGET_FILE:fx_xinput>")
+# The largest size on a handheld's screen.
+add_test(NAME menu_rendering_large
+    COMMAND fc3pp_overlay_shot --scale 200 "${CMAKE_BINARY_DIR}/menu_large.bmp" 1280 800)
+set_tests_properties(menu_rendering menu_rendering_large PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
 
 # ---- runtime smoke tests: the proxy inside a 32-bit host -------------------------
 # Everything lands in one folder so the host finds its fixtures.
@@ -101,6 +105,8 @@ if(NOT MSVC)
     target_link_options(fx_dinput PRIVATE -Wl,--kill-at)
 endif()
 fc3pp_runtime_target(fx_dinput)
+
+add_dependencies(fc3pp_overlay_shot fx_xinput)
 
 foreach(engine fx_engine_d3d11 fx_engine_dx9)
     target_link_libraries(${engine} PRIVATE fx_xinput dinput8)

@@ -28,9 +28,8 @@
 
 #define MAX_VERTICES 24576u /* 4096 rectangles */
 #define ATLAS_WIDTH 1024
-#define GLYPH_PAD 2
 #define MIN_LINE 14.0f
-#define MAX_LINE 56.0f
+#define MAX_LINE 96.0f
 
 static const GUID IID_Texture2D = {0x6f15aaf2, 0xd208, 0x4e89, {0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}};
 static const GUID IID_Device = {0xdb6f6ddb, 0xac77, 0x4e88, {0x82, 0x53, 0x81, 0x9d, 0xf9, 0xbb, 0xf1, 0x40}};
@@ -240,6 +239,9 @@ static int create_font(float line_height)
     unsigned char *coverage;
     int cell_h, rows, atlas_h, x, y, c, i;
     int pixel_height = (int)(line_height * 0.80f + 0.5f);
+    /* Room around each glyph: letters such as j and f reach beyond their own
+     * width, the more the larger the font. */
+    int pad = 2 + pixel_height / 5;
     SIZE extent[MD_GLYPHS];
     HRESULT hr;
 
@@ -263,11 +265,11 @@ static int create_font(float line_height)
         if (!GetTextExtentPoint32W(dc, &ch, 1, &extent[c]) || extent[c].cx <= 0) {
             extent[c].cx = pixel_height / 2;
         }
-        if (x + extent[c].cx + 2 * GLYPH_PAD > ATLAS_WIDTH) {
+        if (x + extent[c].cx + 2 * pad > ATLAS_WIDTH) {
             x = 0;
             ++rows;
         }
-        x += extent[c].cx + 2 * GLYPH_PAD;
+        x += extent[c].cx + 2 * pad;
     }
     atlas_h = rows * (cell_h + 1);
 
@@ -303,19 +305,27 @@ static int create_font(float line_height)
     for (c = 0; c < MD_GLYPHS; ++c) {
         WCHAR ch = (WCHAR)(MD_FIRST_CHAR + c);
         md_glyph *glyph = &g.font.glyph[c];
-        int cell_w = extent[c].cx + 2 * GLYPH_PAD;
+        int cell_w = extent[c].cx + 2 * pad;
         if (x + cell_w > ATLAS_WIDTH) {
             x = 0;
             y += cell_h + 1;
         }
-        TextOutW(dc, x + GLYPH_PAD, y, &ch, 1);
+        {
+            /* clipped to its cell, so that nothing of it lands in a neighbour's */
+            RECT cell;
+            cell.left = x;
+            cell.top = y;
+            cell.right = x + cell_w;
+            cell.bottom = y + cell_h;
+            ExtTextOutW(dc, x + pad, y, ETO_CLIPPED, &cell, &ch, 1, NULL);
+        }
         glyph->u0 = (float)x / ATLAS_WIDTH;
         glyph->v0 = (float)y / (float)atlas_h;
         glyph->u1 = (float)(x + cell_w) / ATLAS_WIDTH;
         glyph->v1 = (float)(y + cell_h) / (float)atlas_h;
         glyph->w = (float)cell_w;
         glyph->h = (float)cell_h;
-        glyph->x_offset = -(float)GLYPH_PAD;
+        glyph->x_offset = -(float)pad;
         glyph->advance = (float)extent[c].cx;
         x += cell_w;
     }
@@ -363,6 +373,13 @@ static int create_font(float line_height)
 
 /* ---- per frame ------------------------------------------------------------------- */
 
+static int g_scale_percent = 100;
+
+void overlay_set_scale(int percent)
+{
+    g_scale_percent = percent < 100 ? 100 : percent > 200 ? 200 : percent;
+}
+
 int overlay_begin(void *swap_chain, float *width, float *height, const md_font **font)
 {
     IDXGISwapChain *chain = (IDXGISwapChain *)swap_chain;
@@ -404,7 +421,7 @@ int overlay_begin(void *swap_chain, float *width, float *height, const md_font *
     g.width = (float)desc.Width;
     g.height = (float)desc.Height;
 
-    line = g.height / 46.0f;
+    line = g.height / 46.0f * (float)g_scale_percent / 100.0f;
     if (line < MIN_LINE) {
         line = MIN_LINE;
     }

@@ -344,6 +344,46 @@ static void test_menu_layout(void)
     CHECK_EQ_U(l.count, 0);
 }
 
+static void test_pad_combinations(void)
+{
+    unsigned mask = 0xDEAD;
+
+    CHECK(mm_pad_combo_from_name("L3+R3", &mask) == 1);
+    CHECK_EQ_U(mask, MM_PAD_L3 | MM_PAD_R3);
+    CHECK(mm_pad_combo_from_name("back + start", &mask) == 1);
+    CHECK_EQ_U(mask, MM_PAD_BACK | MM_PAD_START);
+    CHECK(mm_pad_combo_from_name("  Select+Menu ", &mask) == 1); /* other names for the same two */
+    CHECK_EQ_U(mask, MM_PAD_BACK | MM_PAD_START);
+    CHECK(mm_pad_combo_from_name("LB+RB+Y", &mask) == 1);
+    CHECK_EQ_U(mask, MM_PAD_LB | MM_PAD_RB | MM_PAD_Y);
+    CHECK(mm_pad_combo_from_name("View+Down", &mask) == 1);
+    CHECK_EQ_U(mask, MM_PAD_BACK | MM_PAD_DOWN);
+    /* the values are the ones XInput reports */
+    CHECK_EQ_U(MM_PAD_L3 | MM_PAD_R3, 0x00C0);
+    CHECK_EQ_U(MM_PAD_A | MM_PAD_B | MM_PAD_X | MM_PAD_Y, 0xF000);
+
+    /* switched off */
+    mask = 0xDEAD;
+    CHECK(mm_pad_combo_from_name("None", &mask) == 1);
+    CHECK_EQ_U(mask, 0);
+    mask = 0xDEAD;
+    CHECK(mm_pad_combo_from_name(" off", &mask) == 1 && mask == 0);
+
+    /* not understood: the caller keeps what it had */
+    mask = 0xDEAD;
+    CHECK(mm_pad_combo_from_name("L3", &mask) == 0);       /* one button would fire in play */
+    CHECK(mm_pad_combo_from_name("L3+L3", &mask) == 0);    /* still one button */
+    CHECK(mm_pad_combo_from_name("L3+", &mask) == 0);
+    CHECK(mm_pad_combo_from_name("+R3", &mask) == 0);
+    CHECK(mm_pad_combo_from_name("L3 R3", &mask) == 0);
+    CHECK(mm_pad_combo_from_name("L3+Banana", &mask) == 0);
+    CHECK(mm_pad_combo_from_name("LeftShoulderButton+R3", &mask) == 0);
+    CHECK(mm_pad_combo_from_name("", &mask) == 0);
+    CHECK(mm_pad_combo_from_name(NULL, &mask) == 0);
+    CHECK(mm_pad_combo_from_name("L3+R3", NULL) == 0);
+    CHECK_EQ_U(mask, 0xDEAD);
+}
+
 void suite_menu(void)
 {
     RUN(test_navigation);
@@ -351,6 +391,7 @@ void suite_menu(void)
     RUN(test_scrolling);
     RUN(test_repeat_and_chord);
     RUN(test_key_names);
+    RUN(test_pad_combinations);
     RUN(test_text);
     RUN(test_menu_layout);
 }

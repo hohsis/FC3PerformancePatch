@@ -210,6 +210,74 @@ unsigned mm_key_from_name(const char *name)
     return 0;
 }
 
+int mm_pad_combo_from_name(const char *text, unsigned *mask)
+{
+    static const struct {
+        const char *name;
+        unsigned bit;
+    } names[] = {{"A", MM_PAD_A},         {"B", MM_PAD_B},       {"X", MM_PAD_X},         {"Y", MM_PAD_Y},
+                 {"LB", MM_PAD_LB},       {"RB", MM_PAD_RB},     {"L3", MM_PAD_L3},       {"R3", MM_PAD_R3},
+                 {"Back", MM_PAD_BACK},   {"Select", MM_PAD_BACK}, {"View", MM_PAD_BACK}, {"Start", MM_PAD_START},
+                 {"Menu", MM_PAD_START},  {"Up", MM_PAD_UP},     {"Down", MM_PAD_DOWN},   {"Left", MM_PAD_LEFT},
+                 {"Right", MM_PAD_RIGHT}};
+    unsigned found = 0, buttons = 0;
+    const char *p = text;
+
+    if (!text || !mask) {
+        return 0;
+    }
+    while (*p == ' ' || *p == '\t') {
+        ++p;
+    }
+    if (same_name(p, "none") || same_name(p, "off") || same_name(p, "0")) {
+        *mask = 0;
+        return 1;
+    }
+    for (;;) {
+        char word[8];
+        size_t n = 0, i;
+        unsigned bit = 0;
+
+        while (*p == ' ' || *p == '\t') {
+            ++p;
+        }
+        while (*p && *p != '+' && *p != ' ' && *p != '\t') {
+            if (n + 1 >= sizeof(word)) {
+                return 0;
+            }
+            word[n++] = *p++;
+        }
+        word[n] = '\0';
+        for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+            if (same_name(word, names[i].name)) {
+                bit = names[i].bit;
+            }
+        }
+        if (!bit) {
+            return 0;
+        }
+        if (!(found & bit)) {
+            found |= bit;
+            ++buttons;
+        }
+        while (*p == ' ' || *p == '\t') {
+            ++p;
+        }
+        if (!*p) {
+            break;
+        }
+        if (*p != '+') {
+            return 0;
+        }
+        ++p;
+    }
+    if (buttons < 2) {
+        return 0;
+    }
+    *mask = found;
+    return 1;
+}
+
 int mm_repeat_step(mm_repeat *r, int down, unsigned long now_ms)
 {
     if (!down) {

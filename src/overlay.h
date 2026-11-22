@@ -16,6 +16,10 @@
  * that presents. */
 int overlay_begin(void *swap_chain, float *width, float *height, const md_font **font);
 
+/* Size of the text in percent of the normal size (100 to 200). Takes effect
+ * with the next overlay_begin. */
+void overlay_set_scale(int percent);
+
 /* Draws the list and puts the engine's Direct3D state back as it was. */
 void overlay_draw(const md_list *list);
 

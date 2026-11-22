@@ -533,19 +533,31 @@ tools exist, so extending them was not an option.
 - **What it is made of.** The entries, their behaviour (`src/menu_model.c`) and the layout
   (`src/menu_draw.c`) are plain C without any system calls and are unit-tested; the layout scales with
   the picture's height.
-- **Input.** The keys are read with `GetAsyncKeyState`, the gamepad with the game's own `XInputGetState`.
+- **Input.** The keys are read with `GetAsyncKeyState`, the gamepad with the game's own `XInputGetState`
+  (under Steam Input and Proton that is the emulated Xbox controller every Steam-supported pad
+  appears as). Everything can be done with the gamepad alone: a button combination held for 0.35 s
+  opens and closes the menu (`[Menu] PadButtons`, by default both thumbsticks pressed in), D-pad or
+  left stick move and change, A switches, B closes. From the moment all buttons of the combination
+  are down the engine no longer sees them, so holding them does not also trigger what the game has
+  on those buttons; a button of the combination does nothing in the menu until it was let go.
   So that the game does not act on the same input, the engine's import of `XInputGetState` (by ordinal,
   from `xinput1_3.dll`) and the keyboard and mouse devices it creates through `DirectInput8Create` are
   wrapped: while the menu is open, and until the keys that closed it are up again, the engine is told
   that nothing is pressed. DirectInput game controllers are left alone. The runtime tests exercise this
   against stand-in input DLLs, including a menu that has to give up: the input then flows again.
+- **Size.** The text is 1/46 of the picture's height, times `[Menu] Scale` (100 to 200 %, also in the
+  menu itself) for handheld screens and televisions. The glyphs are clipped to their cells in the font
+  texture and padded in proportion to their size; without that, letters with overhang (j, f) leave
+  specks under their neighbours at large sizes.
 - **Settings.** A change is written to the INI file with `WritePrivateProfileString`, which keeps the
   file's comments. Most of the current settings are read once at start-up, so the menu says when a change
   needs a restart.
 
 Status: the model and layout have unit tests; a test program draws the menu on a real Direct3D 11 device
 at 1280x720 and 3840x2160, checks the picture (panel, text, untouched remainder) and that render target,
-blend, rasteriser, viewport and topology are as it left them; the runtime tests cover the `Present` hook
+blend, rasteriser, viewport and topology are as it left them, then operates it with a stand-in gamepad
+only (opening combination, D-pad, A, B) and checks that the changed settings reach the INI file; the
+runtime tests cover the `Present` hook
 on a stand-in swap chain, including a menu that cannot draw. **It has not been used inside the game
 yet**, and nothing is known about how it behaves under the Steam or Ubisoft Connect overlays, with DXVK,
 or in exclusive fullscreen. It does not exist for the DX9 executables.

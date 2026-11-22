@@ -77,6 +77,31 @@ mm_item *mm_find(mm_menu *m, int id);
  * into a Windows virtual-key code; 0 when the name is not known. */
 unsigned mm_key_from_name(const char *name);
 
+/* ---- gamepad buttons -------------------------------------------------------------
+ * The bits XInput uses, so that this file needs no Windows header. */
+#define MM_PAD_UP 0x0001u
+#define MM_PAD_DOWN 0x0002u
+#define MM_PAD_LEFT 0x0004u
+#define MM_PAD_RIGHT 0x0008u
+#define MM_PAD_START 0x0010u
+#define MM_PAD_BACK 0x0020u
+#define MM_PAD_L3 0x0040u
+#define MM_PAD_R3 0x0080u
+#define MM_PAD_LB 0x0100u
+#define MM_PAD_RB 0x0200u
+#define MM_PAD_A 0x1000u
+#define MM_PAD_B 0x2000u
+#define MM_PAD_X 0x4000u
+#define MM_PAD_Y 0x8000u
+
+/* Parses a combination of gamepad buttons held together, such as "L3+R3" or
+ * "Back+Start" (names: A B X Y LB RB L3 R3 Back Start Up Down Left Right; also
+ * Select and View for Back, Menu for Start; upper or lower case, blanks
+ * allowed). "None" gives 0: no combination. A single button is refused: it
+ * would open the menu in the middle of play. Returns 1 and sets *mask, or 0
+ * when the text is not understood. */
+int mm_pad_combo_from_name(const char *text, unsigned *mask);
+
 /* ---- key repeat ------------------------------------------------------------------
  * A held direction acts once, then again after a pause, then steadily. */
 

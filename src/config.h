@@ -47,6 +47,9 @@ typedef struct fc3pp_config {
     int menu_enabled;       /* the in-game settings menu (DX11) */
     unsigned menu_key;      /* virtual-key code that opens it */
     int menu_key_invalid;   /* the Key= value was not understood */
+    unsigned menu_pad;      /* gamepad buttons that open it when held together; 0 = none */
+    int menu_pad_invalid;   /* the PadButtons= value was not understood */
+    int menu_scale;         /* size of the menu in percent, 100 to 200 */
 
     /* [Controls] */
     int auto_switch_input; /* gamepad or keyboard/mouse mode follows what is used */

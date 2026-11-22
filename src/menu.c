@@ -46,11 +46,14 @@ enum {
     ID_KEEP_XAUDIO,
     ID_AUTO_SWITCH,
     ID_DRAW_DISTANCE,
+    ID_MENU_SCALE,
     ID_CLOSE
 };
 
 static const char *const MODE_NAMES[] = {"off", "engine", "process"};
 static const char *const DISTANCE_NAMES[] = {"Original", "Far", "Very far"};
+static const char *const SCALE_NAMES[] = {"100 %", "125 %", "150 %", "175 %", "200 %"};
+#define SCALE_STEPS 5
 
 #define HEADING(text) {MM_HEADING, ID_NONE, text, NULL, 0, 0, 0, 0, NULL, 0, 0, ""}
 #define INFO(id, text) {MM_INFO, id, text, NULL, 0, 0, 0, 0, NULL, 0, 0, ""}
@@ -92,15 +95,39 @@ static mm_item g_items[] = {
     HEADING("Sound"),
     TOGGLE(ID_KEEP_XAUDIO, "Keep the sound library loaded",
            "Guards against a known defect of XAudio2 2.7 that can crash the game."),
+    HEADING("This menu"),
+    {MM_CHOICE, ID_MENU_SCALE, "Size",
+     "Larger text for a handheld or a television across the room. Works at once.", 0, 0, SCALE_STEPS - 1, 1,
+     SCALE_NAMES, SCALE_STEPS, 0, ""},
     HEADING(""),
     {MM_ACTION, ID_CLOSE, "Close", "", 0, 0, 0, 0, NULL, 0, 0, ""},
 };
+
+typedef struct xi_state {
+    DWORD packet;
+    WORD buttons;
+    BYTE left_trigger, right_trigger;
+    SHORT lx, ly, rx, ry;
+} xi_state;
+
+#define XI_UP 0x0001u
+#define XI_DOWN 0x0002u
+#define XI_LEFT 0x0004u
+#define XI_RIGHT 0x0008u
+#define XI_LEFT_THUMB 0x0040u
+#define XI_RIGHT_THUMB 0x0080u
+#define XI_A 0x1000u
+#define XI_B 0x2000u
+#define XI_STICK 16000
+#define XI_COMBO_DEFAULT (XI_LEFT_THUMB | XI_RIGHT_THUMB)
 
 static mm_menu g_menu = {FC3PP_NAME " " FC3PP_VERSION, g_items, sizeof(g_items) / sizeof(g_items[0]), 0, 0, 0};
 static wchar_t g_ini_path[MAX_PATH + 40];
 static unsigned g_key = VK_F8;
 static int g_enabled;
 static int g_auto_switch; /* asked for in the INI file */
+static unsigned g_combo = XI_COMBO_DEFAULT; /* gamepad buttons that open the menu when held together */
+static int g_assume_focus;                  /* testing aid: read the gamepad without the focus */
 
 static volatile LONG g_open;          /* read by the input hooks on other threads */
 static volatile LONG g_hold_keyboard; /* closed, but keys that operated it are still down */
@@ -145,6 +172,10 @@ void menu_init(const fc3pp_config *cfg, const wchar_t *ini_path)
     set_value(ID_AUTO_SWITCH, cfg->auto_switch_input);
     set_value(ID_DRAW_DISTANCE, cfg->draw_distance);
     g_auto_switch = cfg->auto_switch_input;
+    g_combo = cfg->menu_pad & 0xFFFFu;
+    g_assume_focus = cfg->input_without_focus;
+    set_value(ID_MENU_SCALE, (cfg->menu_scale - 100 + 12) / 25);
+    overlay_set_scale(cfg->menu_scale);
     it = mm_find(&g_menu, ID_STATUS_VERSION);
     if (it) {
         snprintf(it->text, sizeof(it->text), "%s", FC3PP_VERSION);
@@ -215,6 +246,11 @@ static void save(int id)
     case ID_DRAW_DISTANCE:
         section = L"Graphics", key = L"DrawDistance";
         break;
+    case ID_MENU_SCALE:
+        section = L"Menu", key = L"Scale";
+        _snwprintf(value, 32, L"%d", 100 + 25 * it->value);
+        overlay_set_scale(100 + 25 * it->value);
+        break;
     default:
         return;
     }
@@ -229,23 +265,6 @@ static void save(int id)
 }
 
 /* ---- gamepad ----------------------------------------------------------------------- */
-
-typedef struct xi_state {
-    DWORD packet;
-    WORD buttons;
-    BYTE left_trigger, right_trigger;
-    SHORT lx, ly, rx, ry;
-} xi_state;
-
-#define XI_UP 0x0001u
-#define XI_DOWN 0x0002u
-#define XI_LEFT 0x0004u
-#define XI_RIGHT 0x0008u
-#define XI_LEFT_THUMB 0x0040u
-#define XI_RIGHT_THUMB 0x0080u
-#define XI_A 0x1000u
-#define XI_B 0x2000u
-#define XI_STICK 16000
 
 typedef DWORD(WINAPI *xi_get_state_fn)(DWORD index, xi_state *state);
 
@@ -313,6 +332,11 @@ static DWORD WINAPI hook_xinput_get_state(DWORD index, xi_state *state)
         } else {
             padswitch_gamepad(state->buttons, state->left_trigger, state->right_trigger, state->lx, state->ly,
                               state->rx, state->ry);
+            /* The buttons that open the menu, once they are all down: the game
+             * is not to act on them while they are held to open it. */
+            if (g_enabled && g_combo && (state->buttons & g_combo) == g_combo) {
+                state->buttons = (WORD)(state->buttons & ~g_combo);
+            }
         }
     }
     return result;
@@ -534,10 +558,14 @@ unsigned menu_install_hooks(HMODULE engine)
     if (!g_enabled) {
         return hooks;
     }
-    if (g_key >= VK_F1 && g_key <= VK_F12) {
-        LOGI("menu: F%u opens the settings menu; on a gamepad, hold both thumbsticks in", g_key - VK_F1 + 1);
-    } else {
-        LOGI("menu: the key set in the INI file opens the settings menu; on a gamepad, hold both thumbsticks in");
+    {
+        const char *pad = g_combo == XI_COMBO_DEFAULT ? "; on a gamepad, hold both thumbsticks in"
+                          : g_combo ? "; on a gamepad, hold the buttons set in the INI file" : "";
+        if (g_key >= VK_F1 && g_key <= VK_F12) {
+            LOGI("menu: F%u opens the settings menu%s", g_key - VK_F1 + 1, pad);
+        } else {
+            LOGI("menu: the key set in the INI file opens the settings menu%s", pad);
+        }
     }
     if (hooks != 2) {
         LOGI("menu: the game's own input cannot be held back in this renderer; it will also react to the keys "
@@ -582,9 +610,10 @@ void menu_on_present(void *swap_chain)
     static md_vertex vertices[24576];
     static int used_gamepad;
     static unsigned frame;
+    static unsigned ignore_pad; /* buttons still down from opening the menu */
     unsigned long now;
     unsigned pad;
-    int focus, toggle, changed, down;
+    int focus, pad_focus, toggle, changed, down;
     const md_font *font = NULL;
     float w = 0, h = 0;
     md_list list;
@@ -594,38 +623,46 @@ void menu_on_present(void *swap_chain)
     }
     now = GetTickCount();
     focus = game_has_focus();
-    pad = focus ? gamepad_buttons() : 0;
+    pad_focus = focus || g_assume_focus;
+    pad = pad_focus ? gamepad_buttons() : 0;
 
     down = focus && key_down((int)g_key);
     toggle = down && !was_key;
     was_key = down;
-    if (mm_chord_step(&chord, (pad & (XI_LEFT_THUMB | XI_RIGHT_THUMB)) == (XI_LEFT_THUMB | XI_RIGHT_THUMB), now)) {
+    if (mm_chord_step(&chord, g_combo && (pad & g_combo) == g_combo, now)) {
         toggle = 1;
         used_gamepad = 1;
+        ignore_pad = g_combo;
     }
+    /* A button of the opening combination does nothing in the menu until it was let go. */
+    ignore_pad &= pad;
     if (toggle) {
         mm_open(&g_menu, !g_menu.open);
     }
 
-    if (g_menu.open && focus && !toggle) {
+    if (g_menu.open && pad_focus && !toggle) {
         mm_input input = MM_IN_NONE;
-        int accept_key = key_down(VK_RETURN), back_key = key_down(VK_BACK) || key_down(VK_ESCAPE);
-        int accept = accept_key || (pad & XI_A), back = back_key || (pad & XI_B);
+        unsigned nav = pad & ~ignore_pad;
+        int k_up = focus && key_down(VK_UP), k_down = focus && key_down(VK_DOWN);
+        int k_left = focus && key_down(VK_LEFT), k_right = focus && key_down(VK_RIGHT);
+        int accept_key = focus && key_down(VK_RETURN);
+        int back_key = focus && (key_down(VK_BACK) || key_down(VK_ESCAPE));
+        int accept = accept_key || (nav & XI_A), back = back_key || (nav & XI_B);
         int by_pad = 0;
 
         /* Directions repeat while held; accept and back act once per press. */
-        if (mm_repeat_step(&r_up, key_down(VK_UP) || (pad & XI_UP), now)) {
+        if (mm_repeat_step(&r_up, k_up || (nav & XI_UP), now)) {
             input = MM_IN_UP;
-            by_pad = !key_down(VK_UP);
-        } else if (mm_repeat_step(&r_down, key_down(VK_DOWN) || (pad & XI_DOWN), now)) {
+            by_pad = !k_up;
+        } else if (mm_repeat_step(&r_down, k_down || (nav & XI_DOWN), now)) {
             input = MM_IN_DOWN;
-            by_pad = !key_down(VK_DOWN);
-        } else if (mm_repeat_step(&r_left, key_down(VK_LEFT) || (pad & XI_LEFT), now)) {
+            by_pad = !k_down;
+        } else if (mm_repeat_step(&r_left, k_left || (nav & XI_LEFT), now)) {
             input = MM_IN_LEFT;
-            by_pad = !key_down(VK_LEFT);
-        } else if (mm_repeat_step(&r_right, key_down(VK_RIGHT) || (pad & XI_RIGHT), now)) {
+            by_pad = !k_left;
+        } else if (mm_repeat_step(&r_right, k_right || (nav & XI_RIGHT), now)) {
             input = MM_IN_RIGHT;
-            by_pad = !key_down(VK_RIGHT);
+            by_pad = !k_right;
         } else if (accept && !was_accept) {
             input = MM_IN_ACCEPT;
             by_pad = !accept_key;
@@ -658,7 +695,7 @@ void menu_on_present(void *swap_chain)
             !key_down((int)g_key)) {
             InterlockedExchange(&g_hold_keyboard, 0);
         }
-        if (g_hold_gamepad && !(pad & (XI_A | XI_B | XI_LEFT_THUMB | XI_RIGHT_THUMB))) {
+        if (g_hold_gamepad && !(pad & (XI_A | XI_B | g_combo))) {
             InterlockedExchange(&g_hold_gamepad, 0);
         }
         return;
@@ -682,7 +719,7 @@ void menu_on_present(void *swap_chain)
     list.cap = sizeof(vertices) / sizeof(vertices[0]);
     list.dropped = 0;
     md_menu(&list, font, &g_menu, w, h,
-            used_gamepad ? "D-pad: select and change     A: switch     B: close"
+            used_gamepad ? "D-pad or left stick: select and change     A: switch     B: close"
                          : "Arrow keys: select and change     Enter: switch     Backspace: close");
     overlay_draw(&list);
 }

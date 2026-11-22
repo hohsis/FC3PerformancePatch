@@ -960,8 +960,9 @@ static int key_seen(unsigned scan_code)
     return fx_input_state(0, keys, sizeof(keys)) == 0 && keys[scan_code] == 0x80;
 }
 
-/* switching: 1 = the patch is to follow the device in use, 0 = it is not. */
-static void scenario_input(int switching)
+/* switching: 1 = the patch is to follow the device in use, 0 = it is not.
+ * menu: 1 = the in-game menu exists (its opening combination is L3+R3). */
+static void scenario_input(int switching, int menu)
 {
     unsigned char *mgr = fx_ui_manager(0);
     unsigned char before[64];
@@ -981,6 +982,18 @@ static void scenario_input(int switching)
         return;
     }
     CHECK(fx_input_open() == 0, "the engine fixture could not create its input devices");
+
+    /* The two buttons that open the menu when held together belong to the menu
+     * from the moment both are down; each alone is the game's. */
+    pad_set(1, 0x0040, 0, 0);
+    CHECK(read_pad() == 0x0040, "the engine does not see the left thumbstick button alone");
+    pad_set(1, 0x00C0 | PAD_A, 0, 0);
+    CHECK(read_pad() == (menu ? PAD_A : (0x00C0 | PAD_A)),
+          "both thumbstick buttons held: the engine sees buttons 0x%04X", read_pad());
+    pad_set(1, 0x0080, 0, 0);
+    CHECK(read_pad() == 0x0080, "the engine does not see the right thumbstick button alone");
+    pad_set(1, 0, 0, 0);
+    read_pad();
 
     /* The game has no UI manager yet (early start-up): input flows, nothing is written. */
     pad_set(1, PAD_A, 0, 0);
@@ -1333,9 +1346,13 @@ int main(int argc, char **argv)
                strcmp(scenario, "menu-off") == 0) {
         scenario_menu();
     } else if (strcmp(scenario, "input") == 0) {
-        scenario_input(1);
+        scenario_input(1, 1);
     } else if (strcmp(scenario, "input-off") == 0) {
-        scenario_input(0);
+        scenario_input(0, 1);
+    } else if (strcmp(scenario, "input-nomenu") == 0) {
+        scenario_input(0, 0);
+    } else if (strcmp(scenario, "input-switch-nomenu") == 0) {
+        scenario_input(1, 0);
     } else if (strcmp(scenario, "input-held") == 0) {
         scenario_input_held();
     } else if (strcmp(scenario, "drawdistance") == 0) {

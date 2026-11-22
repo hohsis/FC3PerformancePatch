@@ -468,6 +468,11 @@ static void fc3pp_init(HINSTANCE self)
         LOGE("config: the [Menu] Key= value is not a key name this patch knows (F1 to F12, Home, End, Insert, "
              "Delete, Pause, ScrollLock, PageUp, PageDown, Tab); using F8");
     }
+    if (g_cfg.menu_pad_invalid) {
+        LOGE("config: the [Menu] PadButtons= value is not a combination of two or more gamepad buttons this "
+             "patch knows (A B X Y LB RB L3 R3 Back Start Up Down Left Right, joined with +, or None); "
+             "using L3+R3");
+    }
     menu_init(&g_cfg, ini_path);
     apply_laa(host);
     apply_timer_resolution();

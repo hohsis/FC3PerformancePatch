@@ -33,6 +33,8 @@ void config_defaults(fc3pp_config *cfg)
     cfg->texture_scan = 1;
     cfg->menu_enabled = 1;
     cfg->menu_key = 0x77; /* F8 */
+    cfg->menu_pad = MM_PAD_L3 | MM_PAD_R3;
+    cfg->menu_scale = 100;
 }
 
 const char *config_mode_name(cpu_mode mode)
@@ -156,6 +158,19 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
             }
         }
     }
+
+    {
+        const char *pad = ini_get(&doc, "Menu", "PadButtons");
+        if (pad && *pad) {
+            unsigned mask = 0;
+            if (mm_pad_combo_from_name(pad, &mask)) {
+                cfg->menu_pad = mask;
+            } else {
+                cfg->menu_pad_invalid = 1;
+            }
+        }
+    }
+    cfg->menu_scale = (int)ini_get_int_clamped(&doc, "Menu", "Scale", cfg->menu_scale, 100, 200);
 
     cfg->keep_xaudio2_loaded = ini_get_bool(&doc, "Audio", "KeepXAudio2Loaded", cfg->keep_xaudio2_loaded);
 
