@@ -1,6 +1,9 @@
 /* Draws the in-game menu on a real Direct3D 11 device and checks the result.
  *
- *     fc3pp_overlay_shot [--pad <fake xinput1_3.dll>] [--scale <percent>] [picture.bmp] [width height]
+ *     fc3pp_overlay_shot [--pad <fake xinput1_3.dll>] [--scale <percent>] [--steps <presses>]
+ *                        [picture.bmp] [width height]
+ * --steps (with --pad) presses gamepad buttons before the picture is taken, to show the menu in
+ * another state: U, D, L, R for the D-pad, A for the A button. The gamepad test is left out then.
  *
  * It creates a device and a swap chain of its own (hardware, or the software
  * rasteriser where there is no graphics card), fills the back buffer with a
@@ -82,6 +85,7 @@ typedef void (*fxxi_set_fn)(int connected, unsigned buttons, int right_trigger, 
 
 #define PAD_UP 0x0001u
 #define PAD_DOWN 0x0002u
+#define PAD_LEFT 0x0004u
 #define PAD_RIGHT 0x0008u
 #define PAD_L3 0x0040u
 #define PAD_R3 0x0080u
@@ -167,7 +171,7 @@ static void test_gamepad(const wchar_t *ini)
 int main(int argc, char **argv)
 {
     static const FLOAT background[4] = {0.10f, 0.45f, 0.30f, 1.0f}; /* jungle green */
-    const char *picture, *pad_dll = NULL;
+    const char *picture, *pad_dll = NULL, *steps = NULL;
     UINT width, height;
     int scale = 100;
     wchar_t ini[MAX_PATH + 64] = L"";
@@ -200,6 +204,8 @@ int main(int argc, char **argv)
             pad_dll = argv[2];
         } else if (strcmp(argv[1], "--scale") == 0) {
             scale = atoi(argv[2]);
+        } else if (strcmp(argv[1], "--steps") == 0) {
+            steps = argv[2];
         }
         argv += 2;
         argc -= 2;
@@ -287,6 +293,18 @@ int main(int argc, char **argv)
         menu_on_present(chain);
     }
     CHECK(menu_is_open(), "the menu closed itself: it could not draw");
+    if (steps && g_pad_set) {
+        for (; *steps; ++steps) {
+            press(*steps == 'U'   ? PAD_UP
+                  : *steps == 'D' ? PAD_DOWN
+                  : *steps == 'L' ? PAD_LEFT
+                  : *steps == 'R' ? PAD_RIGHT
+                                  : PAD_A);
+        }
+        ID3D11DeviceContext_ClearRenderTargetView(context, target, background);
+        menu_on_present(chain);
+        g_pad_set = NULL; /* the gamepad test expects the menu as it starts */
+    }
     if (!menu_is_open()) {
         /* the patch says why in its log */
         char line[400];
@@ -370,6 +388,8 @@ int main(int argc, char **argv)
 
     if (g_pad_set) {
         test_gamepad(ini);
+    }
+    if (ini[0]) {
         DeleteFileW(ini);
     }
 

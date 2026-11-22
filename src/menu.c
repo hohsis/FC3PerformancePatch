@@ -22,6 +22,7 @@
 #include "menu_draw.h"
 #include "menu_model.h"
 #include "gfx_preset.h"
+#include "gfx_profile.h"
 #include "overlay.h"
 #include "padswitch.h"
 #include "pe_image.h"
@@ -36,6 +37,7 @@ enum {
     ID_STATUS_PROCESSOR,
     ID_STATUS_MEMORY,
     ID_STATUS_TEXTURES,
+    ID_STATUS_DISTANCE,
     ID_MAX_CORES,
     ID_USE_SMT,
     ID_CPU_MODE,
@@ -56,9 +58,9 @@ static const char *const DISTANCE_NAMES[] = {"Original", "Far", "Very far"};
 static const char *const SCALE_NAMES[] = {"100 %", "125 %", "150 %", "175 %", "200 %"};
 #define SCALE_STEPS 5
 
-#define HEADING(text) {MM_HEADING, ID_NONE, text, NULL, 0, 0, 0, 0, NULL, 0, 0, ""}
-#define INFO(id, text) {MM_INFO, id, text, NULL, 0, 0, 0, 0, NULL, 0, 0, ""}
-#define TOGGLE(id, text, help) {MM_TOGGLE, id, text, help, 0, 0, 1, 1, NULL, 0, MM_RESTART, ""}
+#define HEADING(text) {MM_HEADING, ID_NONE, text, NULL, 0, 0, 0, 0, NULL, 0, 0, "", 0}
+#define INFO(id, text) {MM_INFO, id, text, NULL, 0, 0, 0, 0, NULL, 0, 0, "", 0}
+#define TOGGLE(id, text, help) {MM_TOGGLE, id, text, help, 0, 0, 1, 1, NULL, 0, MM_RESTART, "", 0}
 
 static mm_item g_items[] = {
     HEADING("Status"),
@@ -66,28 +68,29 @@ static mm_item g_items[] = {
     INFO(ID_STATUS_PROCESSOR, "Processor"),
     INFO(ID_STATUS_MEMORY, "Memory"),
     INFO(ID_STATUS_TEXTURES, "Texture levels left out"),
+    INFO(ID_STATUS_DISTANCE, "Draw distance in use"),
     HEADING("Processor"),
     {MM_NUMBER, ID_MAX_CORES, "Cores for the game",
      "How many physical cores the game may use. 0 means all of them. 4 to 6 suits this engine best.", 0, 0,
-     FC3PP_MAX_ENGINE_CPUS, 1, NULL, 0, MM_RESTART, ""},
+     FC3PP_MAX_ENGINE_CPUS, 1, NULL, 0, MM_RESTART, "", 0},
     TOGGLE(ID_USE_SMT, "Both threads of each core",
            "Off: one thread per core, which avoids two of the game's workers sharing a core."),
     {MM_CHOICE, ID_CPU_MODE, "Mode",
      "engine: the game's own threads use the chosen cores. process: drivers and sound are limited to them too. "
      "off: the game's own handling.",
-     1, 0, 2, 1, MODE_NAMES, 3, MM_RESTART, ""},
+     1, 0, 2, 1, MODE_NAMES, 3, MM_RESTART, "", 0},
     HEADING("Display"),
     TOGGLE(ID_RESTORE_FULLSCREEN, "Fullscreen after Alt+Tab",
            "Return to fullscreen when you switch back to the game, instead of staying in a window."),
     TOGGLE(ID_DPI_AWARE, "DPI aware", "Stops Windows from scaling the game's window on displays set above 100 %."),
     {MM_CHOICE, ID_DRAW_DISTANCE, "Draw distance",
-     "Keeps detailed models, trees, terrain and sun shadows up to further away. Costs frame rate; 'Very far' "
-     "costs a lot.",
-     0, 0, GP_LEVELS - 1, 1, DISTANCE_NAMES, GP_LEVELS, MM_RESTART, ""},
+     "Shows detailed models, trees, terrain and sun shadows further away. Costs frame rate, 'Very far' a lot. "
+     "Read once when the game starts: you will not see it change here.",
+     0, 0, GP_LEVELS - 1, 1, DISTANCE_NAMES, GP_LEVELS, MM_RESTART, "", 0},
     HEADING("Controls"),
     {MM_TOGGLE, ID_AUTO_SWITCH, "Gamepad or keyboard by use",
      "The game follows whichever you touch: gamepad, or keyboard and mouse. Works at once, no restart.", 0, 0, 1, 1,
-     NULL, 0, 0, ""},
+     NULL, 0, 0, "", 0},
     HEADING("Texture mods"),
     TOGGLE(ID_TEX_MISMATCHED, "Leave out levels that do not fit",
            "Texture mods crash the game without this, unless mip0 loading is switched off in GamerProfile.xml."),
@@ -102,9 +105,9 @@ static mm_item g_items[] = {
     HEADING("This menu"),
     {MM_CHOICE, ID_MENU_SCALE, "Size",
      "Larger text for a handheld or a television across the room. Works at once.", 0, 0, SCALE_STEPS - 1, 1,
-     SCALE_NAMES, SCALE_STEPS, 0, ""},
+     SCALE_NAMES, SCALE_STEPS, 0, "", 0},
     HEADING(""),
-    {MM_ACTION, ID_CLOSE, "Close", "", 0, 0, 0, 0, NULL, 0, 0, ""},
+    {MM_ACTION, ID_CLOSE, "Close", "", 0, 0, 0, 0, NULL, 0, 0, "", 0},
 };
 
 typedef struct xi_state {
@@ -141,7 +144,7 @@ static void set_value(int id, int value)
 {
     mm_item *it = mm_find(&g_menu, id);
     if (it) {
-        it->value = value;
+        mm_set(it, value); /* what the game was started with */
     }
 }
 
@@ -607,6 +610,17 @@ static void update_status(void)
         } else {
             snprintf(it->text, sizeof(it->text), "guard not active");
         }
+    }
+    it = mm_find(&g_menu, ID_STATUS_DISTANCE);
+    if (it) {
+        int level = GP_ORIGINAL;
+        gfx_profile_result result = gfx_profile_state(&level);
+        const char *name = DISTANCE_NAMES[level > GP_ORIGINAL && level < GP_LEVELS ? level : GP_ORIGINAL];
+
+        snprintf(it->text, sizeof(it->text), "%s%s", name,
+                 result == GFX_PROFILE_FAILED    ? ": not applied, see the log"
+                 : result == GFX_PROFILE_WAITING ? ": the game has not read it yet"
+                                                 : "");
     }
 }
 

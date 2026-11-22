@@ -3,6 +3,7 @@
  */
 #include "menu_draw.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #define COL_PANEL 0xEB1A1612ul     /* near-black, 92 % */
@@ -157,7 +158,7 @@ static void measure(layout *l, const md_font *font, const mm_menu *menu, float s
     l->row = l->line * ROW_FACTOR;
     l->pad = l->line * 0.7f;
     l->head = l->line * 1.9f;                    /* title and rule */
-    l->foot = l->line * (HELP_LINES + 1.9f);     /* help text, rule, key hints */
+    l->foot = l->line * (HELP_LINES + 1 + 2.3f); /* help text, when a change applies, key hints */
     room = screen_h * MAX_PANEL_FACTOR - l->head - l->foot - 2 * l->pad;
     rows = room > l->row ? (unsigned)(room / l->row) : 1;
     if (menu && rows > menu->count) {
@@ -234,9 +235,14 @@ void md_menu(md_list *out, const md_font *font, const mm_menu *menu, float scree
             md_rect(out, font, l.x + l.line * 0.18f, row_y, l.w - l.line * 0.18f, l.row, COL_SELECTED);
         }
         mm_value_text(it, value, sizeof(value));
+        if (mm_pending(it)) { /* chosen, but the game still runs with another value */
+            size_t n = strlen(value);
+            snprintf(value + n, sizeof(value) - n, " (restart)");
+        }
         {
+            int marked = (it->flags & MM_RESTART) ? mm_pending(it) : (int)(it->flags & MM_CHANGED);
             md_color label_col = it->kind == MM_INFO ? COL_DIM : COL_TEXT;
-            md_color value_col = it->kind == MM_INFO ? COL_DIM : ((it->flags & MM_CHANGED) ? COL_TITLE : COL_TEXT);
+            md_color value_col = it->kind == MM_INFO ? COL_DIM : (marked ? COL_TITLE : COL_TEXT);
             float value_w = md_text_width(font, value);
             float arrows = selected && it->kind != MM_ACTION ? md_text_width(font, "< ") : 0;
             float value_x = inner_x + inner_w - value_w - arrows;
@@ -270,16 +276,25 @@ void md_menu(md_list *out, const md_font *font, const mm_menu *menu, float scree
     if (menu->selected < menu->count) {
         const mm_item *it = &menu->items[menu->selected];
         help_ctx h;
-        unsigned used;
+        float note_y = y + (float)HELP_LINES * l.line;
         h.out = out;
         h.font = font;
         h.x = inner_x;
         h.y = y;
         h.line = l.line;
-        used = md_wrap(font, it->help ? it->help : "", inner_w, HELP_LINES, help_line, &h);
-        if ((it->flags & MM_RESTART) && (it->flags & MM_CHANGED) && used < HELP_LINES) {
-            md_text(out, font, inner_x, y + (float)used * l.line, "Takes effect the next time the game starts.",
-                    COL_TITLE, inner_w);
+        md_wrap(font, it->help ? it->help : "", inner_w, HELP_LINES, help_line, &h);
+        /* A line of its own for when a change applies: it must not depend on
+         * how much room the help text leaves. */
+        if (mm_pending(it)) {
+            char note[MM_TEXT_MAX + 64];
+            mm_applied_text(it, value, sizeof(value));
+            snprintf(note, sizeof(note), "In use now: %s. Restart the game to change it.", value);
+            md_text(out, font, inner_x, note_y, note, COL_TITLE, inner_w);
+        } else if (it->flags & MM_RESTART) {
+            md_text(out, font, inner_x, note_y, "A change here applies after a restart of the game.", COL_DIM,
+                    inner_w);
+        } else if (it->kind == MM_TOGGLE || it->kind == MM_CHOICE || it->kind == MM_NUMBER) {
+            md_text(out, font, inner_x, note_y, "A change here applies at once.", COL_DIM, inner_w);
         }
     }
     md_text(out, font, inner_x, l.y + l.h - l.pad - l.line, hints ? hints : "", COL_DIM, inner_w);

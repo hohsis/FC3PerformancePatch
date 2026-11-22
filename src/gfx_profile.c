@@ -35,7 +35,8 @@ typedef HANDLE(WINAPI *create_file_a_fn)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIB
 
 static create_file_w_fn g_create_w;
 static create_file_a_fn g_create_a;
-static int g_level;
+static int g_level;  /* the preset the hooks apply; 0 when there are none */
+static int g_wanted; /* the preset asked for when the game started */
 static volatile LONG g_opens, g_applied, g_failed, g_logged, g_backed_up;
 static SRWLOCK g_lock = SRWLOCK_INIT;
 static char *g_config; /* the default render configuration, read once */
@@ -373,7 +374,7 @@ unsigned gfx_profile_install(HMODULE engine, int level)
     if (level <= GP_ORIGINAL || level >= GP_LEVELS) {
         return 0;
     }
-    g_level = level;
+    g_level = g_wanted = level;
     hooks += hook(engine, "kernel32.dll", "CreateFileW", (void *)hook_create_file_w, &g_create_w);
     hooks += hook(engine, "kernel32.dll", "CreateFileA", (void *)hook_create_file_a, &g_create_a);
     if (hooks) {
@@ -383,6 +384,20 @@ unsigned gfx_profile_install(HMODULE engine, int level)
         g_level = GP_ORIGINAL;
     }
     return hooks;
+}
+
+gfx_profile_result gfx_profile_state(int *level)
+{
+    if (level) {
+        *level = g_wanted;
+    }
+    if (g_wanted <= GP_ORIGINAL) {
+        return GFX_PROFILE_OFF;
+    }
+    if (g_applied) {
+        return GFX_PROFILE_IN_USE;
+    }
+    return (g_level <= GP_ORIGINAL || g_failed) ? GFX_PROFILE_FAILED : GFX_PROFILE_WAITING;
 }
 
 void gfx_profile_log_stats(void)

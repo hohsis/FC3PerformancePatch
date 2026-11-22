@@ -27,13 +27,15 @@ default to on, the two extras to off. Copy the new INI too if you want them list
   does not see the keys used in it. `[Menu] Key` changes the key, `[Menu] Enabled=0` removes it.
   It works with a controller alone (Steam Big Picture, Steam Deck): D-pad or left stick, A, B;
   `[Menu] PadButtons` sets the opening combination and `[Menu] Scale` a larger text size.
-- **Two extras, off by default** because they have not been confirmed in play yet; switch them on in
-  the in-game menu or the INI file:
+- **Two extras, off by default**; switch them on in the in-game menu or the INI file:
   - *Gamepad or keyboard by use* (`[Controls] AutoSwitchInput=1`): the game changes between gamepad
     mode and keyboard/mouse mode according to what you touch, instead of staying in the mode set in
-    its options. All four executables.
+    its options. All four executables. Not confirmed in play yet.
   - *Draw distance* (`[Graphics] DrawDistance=1` or `2`): detailed models, trees, terrain and sun
-    shadows up to further away, at a cost in frame rate. `GamerProfile.xml` is not changed.
+    shadows up to further away, at a cost in frame rate. `GamerProfile.xml` is not changed. The game
+    reads these values once when it starts, so a change needs a restart; the menu shows which
+    value is in use. Confirmed to reach the game (Far Cry 3, DX11); the look and the cost are for
+    you to judge.
 - **ARM handhelds (Wine with FEX).** Fast and slow cores are told apart there (Wine does not report
   them), and the patch copes with launchers that move the game to other processors after it has
   started. The test suite passes under FEX; the game itself has not been tried on such a device yet.

@@ -598,8 +598,12 @@ tools exist, so extending them was not an option.
   texture and padded in proportion to their size; without that, letters with overhang (j, f) leave
   specks under their neighbours at large sizes.
 - **Settings.** A change is written to the INI file with `WritePrivateProfileString`, which keeps the
-  file's comments. Most of the current settings are read once at start-up, so the menu says when a change
-  needs a restart.
+  file's comments. Most of the current settings are read once at start-up. The menu keeps the value
+  each of them was started with: a choice that differs from it is shown as "*value* (restart)", and a
+  line of its own under the help text says which value is in use, or - for the others - that a
+  change applies at once. (The first version only added a sentence to the help text when there was
+  room left, and for *Draw distance* there was none: a player switched it back and forth looking
+  for a difference that could not come before the next start.)
 
 The shaders were first compiled at run time with the system's D3D compiler DLL. The game ships none,
 and under Proton's Wine the built-in one did not load in a test, so the menu could not draw there;
@@ -670,7 +674,8 @@ of input would take turns.
 
 ## 12. Draw distance (`[Graphics] DrawDistance`)
 
-Off by default; not yet tried in play.
+Off by default, because it costs frame rate. The game takes the values (measured, see the status
+below); it reads them once at start-up, so a change needs a restart.
 
 ### Where the distances come from
 
@@ -722,9 +727,36 @@ Status: unit tests for the text handling; the runtime tests read a profile throu
 both ways, check what arrives, that the file on disk and other files are untouched and that no
 temporary file is left; the default render configuration is read from the real archives of both
 games (a mod's 31 KB file in a modded Far Cry 3, the original 56 KB LZO-compressed one in Blood
-Dragon) and scaled. **Not tried in the game**: that the engine opens its profile through one of the
-two hooked calls (the log says at exit if it did not), that it takes the sections, and what they
-cost in frame rate are all still to be seen.
+Dragon) and scaled.
+
+In the game (Far Cry 3, DX11, an installation with a mod that brings its own render configuration,
+*ultra* geometry and shadows, *high* terrain): started with *Very far*, the engine opened its profile
+twice, both times through a hooked call, and got the copy. The settings object the
+renderer is given was then read from the running process from outside (`ReadProcessMemory`), and
+compared with the same object in a run without the preset:
+
+| Value | Without | *Very far* |
+|---|---|---|
+| `SunShadowRange0`, `1`, `2` | 3, 12, 60 | 6, 24, 120 |
+| `TerrainDetailViewDistance`, `TerrainDetailBlendViewDistance` | 512, 64 | 1024, 128 |
+| `TerrainLodScale` (terrain section) | 1.0 | 0.5 |
+| `LodScale`, `KillLodScale`, `RealTreesLodScale` | 0.5 each | 0.25 each |
+| `RealTreesVistaMinViewDistanceScale` | 0.55 | 0.275 |
+| `ClustersLodScale` (not part of the preset) | 0.6 | 0.6 |
+
+The per-quality tables the engine keeps hold the scaled values as well: none of the original shadow
+ranges or terrain distances of any quality level was left in the process's heap. Afterwards `GamerProfile.xml` was byte for byte what it had
+been, the one-time copy was made, and no temporary file was left.
+
+The same look at a running game explains why a change in the in-game menu shows nothing until the
+next start: the engine resolves the profile into that object once. The menu therefore marks a changed
+choice with *(restart)*, names the value in use underneath, and has a status line *Draw distance in
+use* that also says when a preset was selected but could not be applied.
+
+**Not judged**: how the result looks and what it costs in frame rate (the check was made at the
+main menu, not in the world); *Far* in the game (same code, other factors); Blood Dragon and DX9 in
+the game; and whether the game would write such sections out when it saves its profile - it did not
+save it in that run, the copy next to the profile is the insurance.
 
 ## 13. Control Flow Guard
 

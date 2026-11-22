@@ -15,14 +15,14 @@ static mm_menu g_menu;
 static void build(void)
 {
     static const mm_item items[] = {
-        {MM_HEADING, 0, "First", NULL, 0, 0, 0, 0, NULL, 0, 0, ""},
-        {MM_INFO, ID_INFO, "Version", NULL, 0, 0, 0, 0, NULL, 0, 0, "1.2.3"},
-        {MM_TOGGLE, ID_SWITCH, "Switch", "A switch.", 0, 0, 1, 1, NULL, 0, MM_RESTART, ""},
-        {MM_CHOICE, ID_CHOICE, "Level", "A choice.", 1, 0, 2, 1, CHOICES, 3, 0, ""},
-        {MM_HEADING, 0, "Second", NULL, 0, 0, 0, 0, NULL, 0, 0, ""},
-        {MM_NUMBER, ID_NUMBER, "Cores", "A number.", 6, 0, 15, 1, NULL, 0, 0, ""},
-        {MM_ACTION, ID_ACTION, "Close", "", 0, 0, 0, 0, NULL, 0, 0, ""},
-        {MM_TOGGLE, ID_LAST, "Last", "The last one.", 1, 0, 1, 1, NULL, 0, 0, ""},
+        {MM_HEADING, 0, "First", NULL, 0, 0, 0, 0, NULL, 0, 0, "", 0},
+        {MM_INFO, ID_INFO, "Version", NULL, 0, 0, 0, 0, NULL, 0, 0, "1.2.3", 0},
+        {MM_TOGGLE, ID_SWITCH, "Switch", "A switch.", 0, 0, 1, 1, NULL, 0, MM_RESTART, "", 0},
+        {MM_CHOICE, ID_CHOICE, "Level", "A choice.", 1, 0, 2, 1, CHOICES, 3, 0, "", 0},
+        {MM_HEADING, 0, "Second", NULL, 0, 0, 0, 0, NULL, 0, 0, "", 0},
+        {MM_NUMBER, ID_NUMBER, "Cores", "A number.", 6, 0, 15, 1, NULL, 0, 0, "", 0},
+        {MM_ACTION, ID_ACTION, "Close", "", 0, 0, 0, 0, NULL, 0, 0, "", 0},
+        {MM_TOGGLE, ID_LAST, "Last", "The last one.", 1, 0, 1, 1, NULL, 0, 0, "", 0},
     };
     memcpy(g_items, items, sizeof(items));
     memset(&g_menu, 0, sizeof(g_menu));
@@ -82,6 +82,25 @@ static void test_values(void)
     CHECK_STR(mm_value_text(&g_items[2], text, sizeof(text)), "On");
     CHECK(mm_handle(&g_menu, MM_IN_LEFT) == ID_SWITCH && g_items[2].value == 0);
     CHECK(mm_handle(&g_menu, MM_IN_RIGHT) == ID_SWITCH && g_items[2].value == 1);
+
+    /* a setting that needs a restart knows which value is in use */
+    CHECK(mm_pending(&g_items[2]));
+    CHECK_STR(mm_applied_text(&g_items[2], text, sizeof(text)), "Off");
+    mm_handle(&g_menu, MM_IN_ACCEPT); /* put back: nothing is waiting, though it was touched */
+    CHECK(!mm_pending(&g_items[2]) && (g_items[2].flags & MM_CHANGED));
+    mm_set(&g_items[2], 1); /* started with it on */
+    CHECK(!mm_pending(&g_items[2]) && !(g_items[2].flags & MM_CHANGED) && g_items[2].value == 1);
+    CHECK_STR(mm_applied_text(&g_items[2], text, sizeof(text)), "On");
+    mm_handle(&g_menu, MM_IN_ACCEPT);
+    CHECK(mm_pending(&g_items[2]) && g_items[2].value == 0);
+    mm_handle(&g_menu, MM_IN_ACCEPT);
+    /* one that applies at once never waits */
+    mm_set(&g_items[3], 1);
+    g_items[3].value = 2;
+    CHECK(!mm_pending(&g_items[3]));
+    CHECK_STR(mm_applied_text(&g_items[3], text, sizeof(text)), "medium");
+    g_items[3].value = 1;
+    CHECK(!mm_pending(&g_items[0]) && !mm_pending(&g_items[1]));
 
     /* choice: left and right step, accept goes on, both wrap */
     mm_handle(&g_menu, MM_IN_DOWN);
@@ -283,6 +302,14 @@ static void test_text(void)
     CHECK_EQ_U(md_wrap(&g_font, "aaaaaaaaaaaaaaaaaaaaaaaaa", 100, 4, NULL, NULL), 3); /* one long word is cut */
 }
 
+/* How many vertices a line of text takes. */
+static unsigned drawn(const char *text)
+{
+    md_list l = list(2000);
+    md_text(&l, &g_font, 0, 0, text, 0xFFFFFFFFul, 0);
+    return l.count;
+}
+
 static void test_menu_layout(void)
 {
     md_list l = list(6000);
@@ -336,6 +363,38 @@ static void test_menu_layout(void)
         }
     }
     CHECK(l.count > 0 && l.dropped == 0);
+
+    /* a setting waiting for a restart says so: in its row and in the line under the help text */
+    {
+        unsigned plain, waiting, at_once;
+
+        build();
+        mm_open(&g_menu, 1); /* on the switch, which needs a restart */
+        l = list(6000);
+        md_menu(&l, &g_font, &g_menu, w, h, "hints");
+        plain = l.count;
+        mm_handle(&g_menu, MM_IN_ACCEPT);
+        l = list(6000);
+        md_menu(&l, &g_font, &g_menu, w, h, "hints");
+        waiting = l.count;
+        /* the row says so, and the note under the help text names the value in use */
+        CHECK_EQ_U(waiting, plain - drawn("Off") + drawn("On (restart)") -
+                                drawn("A change here applies after a restart of the game.") +
+                                drawn("In use now: Off. Restart the game to change it."));
+        CHECK(waiting != plain);
+        mm_handle(&g_menu, MM_IN_ACCEPT); /* back to the value in use */
+        l = list(6000);
+        md_menu(&l, &g_font, &g_menu, w, h, "hints");
+        CHECK_EQ_U(l.count, plain);
+        mm_handle(&g_menu, MM_IN_DOWN); /* a choice that applies at once: changing it adds no note */
+        l = list(6000);
+        md_menu(&l, &g_font, &g_menu, w, h, "hints");
+        at_once = l.count;
+        mm_handle(&g_menu, MM_IN_LEFT); /* "medium" -> "low" and nothing else */
+        l = list(6000);
+        md_menu(&l, &g_font, &g_menu, w, h, "hints");
+        CHECK_EQ_U(l.count, at_once - drawn("medium") + drawn("low"));
+    }
 
     /* no font yet, or no menu: draws nothing rather than crashing */
     l = list(6000);

@@ -124,7 +124,7 @@ void mm_scroll_into_view(mm_menu *m, unsigned visible)
     }
 }
 
-const char *mm_value_text(const mm_item *it, char *buf, size_t len)
+static const char *value_text(const mm_item *it, int value, char *buf, size_t len)
 {
     if (!buf || !len) {
         return "";
@@ -132,15 +132,15 @@ const char *mm_value_text(const mm_item *it, char *buf, size_t len)
     buf[0] = '\0';
     switch (it->kind) {
     case MM_TOGGLE:
-        snprintf(buf, len, "%s", it->value ? "On" : "Off");
+        snprintf(buf, len, "%s", value ? "On" : "Off");
         break;
     case MM_CHOICE:
-        if (it->choices && it->value >= 0 && (unsigned)it->value < it->choice_count) {
-            snprintf(buf, len, "%s", it->choices[it->value]);
+        if (it->choices && value >= 0 && (unsigned)value < it->choice_count) {
+            snprintf(buf, len, "%s", it->choices[value]);
         }
         break;
     case MM_NUMBER:
-        snprintf(buf, len, "%d", it->value);
+        snprintf(buf, len, "%d", value);
         break;
     case MM_INFO:
         snprintf(buf, len, "%s", it->text);
@@ -150,6 +150,27 @@ const char *mm_value_text(const mm_item *it, char *buf, size_t len)
     }
     buf[len - 1] = '\0';
     return buf;
+}
+
+const char *mm_value_text(const mm_item *it, char *buf, size_t len)
+{
+    return value_text(it, it->value, buf, len);
+}
+
+const char *mm_applied_text(const mm_item *it, char *buf, size_t len)
+{
+    return value_text(it, it->applied, buf, len);
+}
+
+void mm_set(mm_item *it, int value)
+{
+    it->value = it->applied = value;
+    it->flags &= ~MM_CHANGED;
+}
+
+int mm_pending(const mm_item *it)
+{
+    return (it->flags & MM_RESTART) && it->kind != MM_INFO && it->kind != MM_HEADING && it->value != it->applied;
 }
 
 mm_item *mm_find(mm_menu *m, int id)

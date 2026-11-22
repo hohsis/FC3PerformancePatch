@@ -32,6 +32,7 @@ typedef struct mm_item {
     unsigned choice_count;
     unsigned flags;
     char text[MM_TEXT_MAX];      /* info: the value shown */
+    int applied;                 /* MM_RESTART: the value the game is running with (see mm_set) */
 } mm_item;
 
 typedef struct mm_menu {
@@ -70,6 +71,16 @@ void mm_scroll_into_view(mm_menu *m, unsigned visible);
 
 /* The value as shown to the user ("On", "6", "engine", info text). */
 const char *mm_value_text(const mm_item *item, char *buf, size_t len);
+
+/* Sets an item's value as the one in use: what the program was started with. */
+void mm_set(mm_item *item, int value);
+
+/* Is this a setting that needs a restart and whose value is not the one in
+ * use? Unlike MM_CHANGED it goes back to 0 when the value is put back. */
+int mm_pending(const mm_item *item);
+
+/* The value in use, as mm_value_text would show it. */
+const char *mm_applied_text(const mm_item *item, char *buf, size_t len);
 
 mm_item *mm_find(mm_menu *m, int id);
 

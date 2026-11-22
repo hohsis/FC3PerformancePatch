@@ -99,7 +99,7 @@ of versions at launch, pick the DirectX 11 one: the menu does not exist in the D
 | `[Textures] SkipReplacedTextureMip0` | `1` | Keeps the game's original close-up texture from showing through a mod's replacement |
 | `[Textures] SkipSharedMip0` | `1` | Does not load close-up texture files that several textures share (crash after long play with some mods) |
 | `[Controls] AutoSwitchInput` | `0` | `1` = gamepad or keyboard/mouse mode follows what you use |
-| `[Graphics] DrawDistance` | `0` | `1` = far, `2` = very far |
+| `[Graphics] DrawDistance` | `0` | `1` = far, `2` = very far. Read when the game starts |
 | `[Menu] Key` | `F8` | The key that opens the in-game menu; `[Menu] Enabled=0` removes the menu |
 | `[Menu] PadButtons` | `L3+R3` | Gamepad buttons that open the menu when held together; `None` = keyboard only |
 | `[Menu] Scale` | `100` | Size of the menu in percent, up to `200` |
@@ -133,6 +133,10 @@ Verified:
   (49 close-up texture files named by up to 17 textures each; none in the unmodded game). The game's
   own unload routine, run from the real DLL on a stand-in texture whose record was freed, faults at
   the address in the dump; through the patch it does not.
+- Draw distance reaches the game: Far Cry 3 (DX11) was started with *Very far* and the settings it
+  then held were read from the running game: sun shadows to 6, 24 and 120 m instead of 3, 12 and 60,
+  terrain detail to 1024 m instead of 512, the level-of-detail scales halved - exactly the preset.
+  `GamerProfile.xml` on disk was byte for byte the same afterwards.
 - The in-game menu draws correctly on a real Direct3D 11 device and leaves the device's state as it
   found it (automated test at 720p and 4K), and can be operated with a gamepad alone: an automated
   test opens it with the button combination, changes settings and closes it again, with a stand-in
@@ -150,9 +154,11 @@ Not verified:
 - The in-game menu inside the game itself: opening it, the game ignoring the keys meanwhile, overlays
   such as Steam's or Ubisoft Connect's on top of it. Nor with a real controller, in Steam Big Picture
   or on SteamOS.
-- **Gamepad or keyboard by use** and **Draw distance** in play. Neither has been tried in the game:
-  whether the game switches cleanly in every screen, and whether it takes the longer distances and
-  what they cost, is not known yet. That is why both are off by default.
+- **Gamepad or keyboard by use** in play: not tried in the game, so whether it switches cleanly in
+  every screen is not known yet. That is why it is off by default.
+- **Draw distance** on screen: the game takes the values (see above), but how the result looks and
+  what it costs in frame rate was not judged in play; *Far* was not started in the game (same code,
+  other factors). Off by default because it costs frame rate.
 - The texture guard with Blood Dragon or with the DX9 executable (not supported there).
 - `SkipSharedMip0` in play: the crash it addresses came after 2 h 45 min, so its absence cannot be
   confirmed quickly. Not available for Blood Dragon (its code is not recognised yet).

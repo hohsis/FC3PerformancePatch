@@ -20,6 +20,17 @@ unsigned gfx_profile_install(HMODULE engine, int level);
  * own. Returns NULL when it cannot be read; the caller frees it. */
 char *gfx_profile_read_default_config(const wchar_t *data_dir, size_t *len);
 
+/* What became of the preset in this run of the game. */
+typedef enum gfx_profile_result {
+    GFX_PROFILE_OFF,     /* none was selected when the game started */
+    GFX_PROFILE_WAITING, /* selected; the game has not read its profile yet */
+    GFX_PROFILE_IN_USE,  /* the game read its profile with the preset's sections */
+    GFX_PROFILE_FAILED   /* selected, but it could not be applied (the log says why) */
+} gfx_profile_result;
+
+/* *level gets the gp_level selected when the game started. Takes no locks. */
+gfx_profile_result gfx_profile_state(int *level);
+
 /* Says in the log what became of the preset. Takes no locks. */
 void gfx_profile_log_stats(void);
 
