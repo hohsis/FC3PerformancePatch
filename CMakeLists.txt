@@ -54,14 +54,14 @@ endif()
 # ---- pure logic (no OS calls): unit-testable ------------------------------
 add_library(fc3pp_core STATIC
     src/ini.c src/config.c src/sigscan.c src/pe_file.c src/cpu_topology.c src/patches.c src/fs_guard.c
-    src/tex_rule.c)
+    src/tex_rule.c src/dunia.c src/tex_scan.c)
 target_include_directories(fc3pp_core PUBLIC src)
 target_link_libraries(fc3pp_core PUBLIC fc3pp_options)
 
 # ---- Win32 layer -----------------------------------------------------------
 add_library(fc3pp_win STATIC
     src/pe_image.c src/log.c src/cpu_shim.c src/laa.c src/vtable.c src/display.c src/audio.c
-    src/texguard.c)
+    src/texguard.c src/tex_stale.c)
 target_link_libraries(fc3pp_win PUBLIC fc3pp_core user32)
 
 # ---- the proxy DLL -----------------------------------------------------------
@@ -88,12 +88,6 @@ add_custom_target(package_files ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:fc3pp_version>" "${FC3PP_PACKAGE_DIR}/version.dll"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/config/FC3PerformancePatch.ini"
-        "${CMAKE_SOURCE_DIR}/scripts/install.bat"
-        "${CMAKE_SOURCE_DIR}/scripts/install.ps1"
-        "${CMAKE_SOURCE_DIR}/scripts/uninstall.bat"
-        "${CMAKE_SOURCE_DIR}/scripts/uninstall.ps1"
-        "${CMAKE_SOURCE_DIR}/scripts/install.sh"
-        "${CMAKE_SOURCE_DIR}/scripts/uninstall.sh"
         "${CMAKE_SOURCE_DIR}/README.md"
         "${CMAKE_SOURCE_DIR}/TECHNICAL.md"
         "${CMAKE_SOURCE_DIR}/LICENSE"

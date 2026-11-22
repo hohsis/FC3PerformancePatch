@@ -36,6 +36,7 @@ __declspec(dllimport) int fx_audio_probe(void);
 __declspec(dllimport) void *fx_tex_create(unsigned index, unsigned width, unsigned height, unsigned levels,
                                           unsigned dxgi_format);
 __declspec(dllimport) int fx_tex_add(void *texture, const void *dds, unsigned size);
+__declspec(dllimport) int fx_tex_add_file(void *texture, const void *xbt, unsigned size);
 __declspec(dllimport) int fx_tex_drop(void *texture);
 __declspec(dllimport) void fx_tex_destroy(void *texture);
 __declspec(dllimport) void fx_tex_fail_next_add(void *texture, int fail);
@@ -666,7 +667,61 @@ static const void *dds_image(unsigned width, unsigned height, const char *fourcc
     return h;
 }
 
-static void scenario_textures(int guard_enabled)
+/* Reads a file next to the executable. Returns its size, 0 if it is not there. */
+static unsigned read_local_file(const char *name, unsigned char *buf, unsigned cap)
+{
+    FILE *f = fopen(name, "rb");
+    size_t n;
+    if (!f) {
+        return 0;
+    }
+    n = fread(buf, 1, cap, f);
+    fclose(f);
+    return (unsigned)n;
+}
+
+/* Top mip level files that belong to a texture a mod has replaced. The test
+ * driver builds a data folder with a patch archive (the "mod") and a game
+ * archive, and leaves two top level files of the game next to the host:
+ * one whose base texture the mod repainted, one whose base it left alone.
+ * Both have exactly the right size, so only the archive scan can tell. */
+static void scenario_stale_textures(int scan_enabled)
+{
+    static unsigned char stale[4096], fresh[4096];
+    unsigned n_stale = read_local_file("stale_top.xbt", stale, sizeof(stale));
+    unsigned n_fresh = read_local_file("fresh_top.xbt", fresh, sizeof(fresh));
+    unsigned s[6];
+    void *t;
+    int cycle;
+
+    CHECK(n_stale > 0x24 + 128 && n_fresh > 0x24 + 128, "the test driver did not provide the texture files");
+    if (!n_stale || !n_fresh) {
+        return;
+    }
+    t = fx_tex_create(7, 64, 64, 7, DXGI_BC1);
+    if (!scan_enabled) {
+        /* SkipReplacedTextureMip0=0: nothing but the size is looked at. */
+        CHECK(fx_tex_add_file(t, stale, n_stale) == 1, "scan off: a top level of the right size was refused");
+        fx_tex_state(t, s);
+        CHECK(s[TS_ADDS] == 1 && s[TS_WIDTH] == 128, "scan off: the engine method was not reached");
+        return;
+    }
+    for (cycle = 0; cycle < 2; ++cycle) {
+        CHECK(fx_tex_add_file(t, stale, n_stale) == 0, "the original top level of a replaced texture was accepted");
+        fx_tex_state(t, s);
+        CHECK(s[TS_ADDS] == 0 && s[TS_WIDTH] == 64, "the original top level of a replaced texture reached the engine");
+        fx_tex_drop(t);
+        fx_tex_state(t, s);
+        CHECK(s[TS_DROPS] == 0 && s[TS_WIDTH] == 64, "the unload that follows was not ignored (cycle %d)", cycle);
+    }
+    /* The top level of a texture the mod did not touch is added as always. */
+    t = fx_tex_create(7, 64, 64, 7, DXGI_BC3);
+    CHECK(fx_tex_add_file(t, fresh, n_fresh) == 1, "the top level of an untouched texture was refused");
+    fx_tex_state(t, s);
+    CHECK(s[TS_ADDS] == 1 && s[TS_WIDTH] == 128, "the top level of an untouched texture did not reach the engine");
+}
+
+static void scenario_textures(int guard_enabled, int scan_enabled)
 {
     unsigned s[6];
     void *t;
@@ -765,6 +820,8 @@ static void scenario_textures(int guard_enabled)
                128);
     fx_tex_state(t, s);
     CHECK(s[TS_ADDS] == 1, "unreadable data was not left to the engine");
+
+    scenario_stale_textures(scan_enabled);
 }
 
 int main(int argc, char **argv)
@@ -808,9 +865,11 @@ int main(int argc, char **argv)
                   "XAudio2_7.dll was unloaded although the patch is meant to keep it loaded");
         }
     } else if (strcmp(scenario, "textures") == 0) {
-        scenario_textures(1);
+        scenario_textures(1, 1);
+    } else if (strcmp(scenario, "textures-noscan") == 0) {
+        scenario_textures(1, 0);
     } else if (strcmp(scenario, "textures-off") == 0) {
-        scenario_textures(0);
+        scenario_textures(0, 0);
     } else if (strcmp(scenario, "forward-only") == 0) {
         /* nothing beyond the shared checks */
     } else {

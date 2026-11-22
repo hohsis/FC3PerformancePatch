@@ -127,7 +127,7 @@ static void apply_laa(const wchar_t *host_path)
         break;
     default:
         LOGE("memory: could not enable Large Address Aware on %ls: %s. "
-             "Run the installer script or make the game folder writable",
+             "Make the game folder writable, or set ApplyLargeAddressAware=0 to stop trying",
              log_basename_w(host_path), laa_result_text(r));
         break;
     }
@@ -240,7 +240,7 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
         }
         hooks += audio_install(mod, &g_cfg);
         if (g_cfg.texture_guard) {
-            texguard_install(mod, name);
+            texguard_install(mod, name, g_cfg.texture_scan);
         }
     }
     if (!seen || applied) {

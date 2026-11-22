@@ -10,9 +10,11 @@
 
 /* Locates the engine's texture class in a mapped engine module and wraps its
  * "add top level", "drop top level" and destructor methods. name is the
- * module's file name, for the log. Returns 1 when the guard is active, 0 when
+ * module's file name, for the log. With scan_archives the game's data folder
+ * is also read in the background to find top levels that belong to textures
+ * a mod has replaced (tex_scan.h). Returns 1 when the guard is active, 0 when
  * the class was not recognised (the module is left untouched). */
-int texguard_install(HMODULE engine, const char *name);
+int texguard_install(HMODULE engine, const char *name, int scan_archives);
 
 /* Writes the counters to the log. Takes no locks. */
 void texguard_log_stats(void);

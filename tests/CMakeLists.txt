@@ -7,7 +7,8 @@ find_package(Python3 COMPONENTS Interpreter)
 add_executable(fc3pp_unit
     unit/main.c unit/dummy_pe.c
     unit/test_ini.c unit/test_sigscan.c unit/test_pe_file.c unit/test_cpu.c
-    unit/test_patches.c unit/test_pe_image.c unit/test_fs_guard.c unit/test_tex_rule.c)
+    unit/test_patches.c unit/test_pe_image.c unit/test_fs_guard.c unit/test_tex_rule.c
+    unit/test_dunia.c)
 target_link_libraries(fc3pp_unit PRIVATE fc3pp_win)
 add_test(NAME unit COMMAND fc3pp_unit)
 
@@ -117,24 +118,4 @@ if(Python3_Interpreter_FOUND)
                 --work-dir "${CMAKE_BINARY_DIR}/runtime-work"
                 "--emulator=${CMAKE_CROSSCOMPILING_EMULATOR}")
     set_tests_properties(runtime PROPERTIES TIMEOUT 900)
-endif()
-
-# ---- installer / uninstaller round trips (in a throw-away fake Steam library) --------
-if(CMAKE_HOST_WIN32)
-    # Stands in for a running game in the "is the game running?" checks.
-    add_executable(fc3pp_sleeper install/sleeper.c)
-    target_link_libraries(fc3pp_sleeper PRIVATE fc3pp_options)
-    add_test(NAME installer_windows
-        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
-                -File "${CMAKE_CURRENT_SOURCE_DIR}/install/test_install.ps1"
-                -PatchDll "$<TARGET_FILE:fc3pp_version>"
-                -SleeperExe "$<TARGET_FILE:fc3pp_sleeper>")
-    set_tests_properties(installer_windows PROPERTIES TIMEOUT 900)
-else()
-    find_program(FC3PP_BASH bash)
-    if(FC3PP_BASH)
-        add_test(NAME installer_linux
-            COMMAND ${FC3PP_BASH} "${CMAKE_CURRENT_SOURCE_DIR}/install/test_install.sh" "$<TARGET_FILE:fc3pp_version>")
-        set_tests_properties(installer_linux PROPERTIES TIMEOUT 900)
-    endif()
 endif()

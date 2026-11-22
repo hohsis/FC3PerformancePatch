@@ -64,8 +64,11 @@ typedef enum tex_verdict {
     TEX_UNREADABLE,  /* not a DDS image we can judge: leave it to the engine */
     TEX_TOO_SMALL,   /* fewer rows or columns than the new top level needs: read overrun */
     TEX_TOO_LARGE,   /* more than the new top level holds: wrong picture */
-    TEX_WRONG_FORMAT /* right size, different pixel format */
+    TEX_WRONG_FORMAT, /* right size, different pixel format */
+    TEX_STALE         /* fits, but belongs to a picture a mod has replaced (tex_scan.h) */
 } tex_verdict;
+
+#define TEX_VERDICT_COUNT 6
 
 /* May the image in dds become the new top level of a texture that is currently
  * width x height in dxgi_format? *seen (optional) receives what the header says. */

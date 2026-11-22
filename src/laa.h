@@ -14,9 +14,9 @@ typedef enum laa_result {
     LAA_NO_MEMORY
 } laa_result;
 
-/* Backup naming shared with the installers:
+/* The original executable is kept as
  *     <file>.fc3pp-YYYYMMDD-HHMMSS.bak        (UTC)
- * The uninstallers restore the oldest such backup. */
+ * Renaming it back undoes the change. */
 #define LAA_BACKUP_INFIX L".fc3pp-"
 #define LAA_BACKUP_SUFFIX L".bak"
 

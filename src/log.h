@@ -14,7 +14,8 @@
 #define LOG_INFO 2
 #define LOG_DEBUG 3
 
-/* Opens (truncates) the log. level LOG_OFF creates no file. */
+/* Opens a fresh log; an existing one is kept as "<name>.previous.log".
+ * level LOG_OFF creates no file and touches nothing. */
 void log_init(const wchar_t *path, int level);
 void log_shutdown(void);
 int log_level(void);

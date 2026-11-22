@@ -15,6 +15,24 @@ static CRITICAL_SECTION g_lock;
 static int g_lock_ready;
 static int g_terminating;
 
+/* Keeps the log of the previous start as "<name>.previous.log": after a crash
+ * the natural thing to do is to start the game again, and that must not
+ * destroy the evidence. Fails harmlessly when there is no log yet. */
+static void keep_previous(const wchar_t *path)
+{
+    static const wchar_t suffix[] = L".previous.log";
+    wchar_t previous[MAX_PATH + 64];
+    size_t len = wcslen(path);
+
+    if (len < 4 || len + sizeof(suffix) / sizeof(suffix[0]) > sizeof(previous) / sizeof(previous[0]) ||
+        _wcsicmp(path + len - 4, L".log") != 0) {
+        return;
+    }
+    memcpy(previous, path, (len - 4) * sizeof(wchar_t));
+    memcpy(previous + len - 4, suffix, sizeof(suffix));
+    MoveFileExW(path, previous, MOVEFILE_REPLACE_EXISTING);
+}
+
 void log_init(const wchar_t *path, int level)
 {
     if (level < LOG_OFF) {
@@ -32,6 +50,7 @@ void log_init(const wchar_t *path, int level)
     if (level == LOG_OFF || !path) {
         return;
     }
+    keep_previous(path);
     g_file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL, CREATE_ALWAYS,
                          FILE_ATTRIBUTE_NORMAL, NULL);
     /* A read-only game folder is not an error: logging is simply unavailable. */

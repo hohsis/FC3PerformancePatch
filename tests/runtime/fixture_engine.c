@@ -462,6 +462,26 @@ FX_API int fx_tex_add(void *texture, const void *dds, unsigned size)
 #endif
 }
 
+/* The same with the whole texture file in hand, as the engine has it: the
+ * method gets the DDS image inside the file and the file buffer itself. */
+FX_API int fx_tex_add_file(void *texture, const void *xbt, unsigned size)
+{
+#ifndef FX_NO_TEXTURES
+    fx_texture *t = (fx_texture *)texture;
+    const unsigned char *file = (const unsigned char *)xbt;
+    unsigned header = (unsigned)file[8] | ((unsigned)file[9] << 8);
+    if (size < header) {
+        return -2;
+    }
+    return ((fx_add_fn)t->vtbl[9])(t, NULL, file + header, size - header, (void *)file, 1) ? 1 : 0;
+#else
+    (void)texture;
+    (void)xbt;
+    (void)size;
+    return -1;
+#endif
+}
+
 FX_API int fx_tex_drop(void *texture)
 {
 #ifndef FX_NO_TEXTURES

@@ -37,6 +37,7 @@
 #include "log.h"
 #include "pe_image.h"
 #include "tex_rule.h"
+#include "tex_stale.h"
 
 #define SLOT_TEXTURE2D_GET_DESC 10
 #define MAX_DETAILED_LINES 8
@@ -69,7 +70,8 @@ static SRWLOCK g_lock = SRWLOCK_INIT;
 
 static volatile LONG g_added;         /* top levels the engine added */
 static volatile LONG g_engine_failed; /* the engine's own add failed */
-static volatile LONG g_left_out[5];   /* indexed by tex_verdict */
+static volatile LONG g_left_out[TEX_VERDICT_COUNT]; /* indexed by tex_verdict */
+static int g_check_stale;
 static volatile LONG g_drops_ignored;
 static volatile LONG g_table_full;
 static volatile LONG g_detailed;
@@ -113,6 +115,13 @@ static void log_left_out(const tg_desc *desc, const tex_dds *seen, tex_verdict v
     if (n > MAX_DETAILED_LINES) {
         return;
     }
+    if (verdict == TEX_STALE) {
+        LOGI("textures: left out a top mip level (%ux%u %s) that was made for the original of a texture a mod has "
+             "replaced; the mod's texture stays in place%s",
+             seen->width, seen->height, tex_format_name(seen->format, got, sizeof(got)),
+             n == MAX_DETAILED_LINES ? "; further cases are only counted" : "");
+        return;
+    }
     LOGI("textures: left out a top mip level that does not fit its texture: the texture is %ux%u %s, so the level "
          "must be %ux%u, but the file holds %ux%u %s (%s)%s",
          desc->width, desc->height, tex_format_name(tex_format_from_dxgi(desc->format), have, sizeof(have)),
@@ -137,6 +146,9 @@ static unsigned char __fastcall hook_add(void *self, void *unused, const void *d
      * one does, it is the engine's business. */
     if (self && dds && describe(self, &desc, &texture) && desc.array_size == 1) {
         verdict = tex_top_level_verdict(desc.width, desc.height, desc.format, dds, size, &seen);
+        if (verdict == TEX_FITS && g_check_stale && tex_stale_check(buffer, dds, size)) {
+            verdict = TEX_STALE;
+        }
     }
     if (verdict != TEX_FITS && verdict != TEX_UNREADABLE) {
         InterlockedIncrement(&g_left_out[verdict]);
@@ -210,7 +222,7 @@ static int code_bytes_at(const pei_section *sec, unsigned nsec, const void *addr
     return 0;
 }
 
-int texguard_install(HMODULE engine, const char *name)
+int texguard_install(HMODULE engine, const char *name, int scan_archives)
 {
     pei_section sec[MAX_SECTIONS];
     tex_class_site site;
@@ -302,6 +314,10 @@ int texguard_install(HMODULE engine, const char *name)
     }
     g_vtbl = vtbl;
     g_slot_add = slot_add;
+    g_check_stale = scan_archives;
+    if (scan_archives) {
+        tex_stale_start();
+    }
     LOGI("%s: texture guard active ('%s' build variant): top mip levels that do not fit their texture are left out "
          "instead of crashing the game",
          name, site.variant);
@@ -312,13 +328,14 @@ void texguard_log_stats(void)
 {
     /* ("small" is a macro in the Windows headers.) */
     LONG n_small = g_left_out[TEX_TOO_SMALL], n_large = g_left_out[TEX_TOO_LARGE];
-    LONG n_format = g_left_out[TEX_WRONG_FORMAT];
+    LONG n_format = g_left_out[TEX_WRONG_FORMAT], n_stale = g_left_out[TEX_STALE];
 
     if (!g_vtbl) {
         return;
     }
     LOGI("textures: %ld top mip levels added, %ld left out because they did not fit (%ld too small, %ld too large, "
-         "%ld in a different pixel format), %ld not added by the engine itself; %ld matching unload requests ignored",
+         "%ld in a different pixel format), %ld left out because a mod replaced their texture, %ld not added by the "
+         "engine itself; %ld matching unload requests ignored",
          (long)g_added, (long)(n_small + n_large + n_format), (long)n_small, (long)n_large, (long)n_format,
-         (long)g_engine_failed, (long)g_drops_ignored);
+         (long)n_stale, (long)g_engine_failed, (long)g_drops_ignored);
 }

@@ -197,6 +197,8 @@ const char *tex_verdict_text(tex_verdict v)
         return "too large";
     case TEX_WRONG_FORMAT:
         return "different pixel format";
+    case TEX_STALE:
+        return "made for the texture a mod replaced";
     default:
         return "not readable";
     }

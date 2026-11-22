@@ -1,6 +1,5 @@
 **Install:** extract the zip, then copy `version.dll` and `FC3PerformancePatch.ini` into the game's
-`bin` folder (or run `install.bat` on Windows / `bash install.sh` on Linux and the Steam Deck).
-On Linux also set the Steam launch option `WINEDLLOVERRIDES="version=n,b" %command%`.
+`bin` folder. On Linux also set the Steam launch option `WINEDLLOVERRIDES="version=n,b" %command%`.
 See the [README](https://github.com/hohsis/FC3PerformancePatch#readme) for details.
 
 Updating from 1.0.0: replace `version.dll`. Your existing INI file keeps working; the new settings
@@ -16,8 +15,9 @@ default to on. Copy the new INI too if you want them listed.
   driver when a texture's separate top level ("mip0" file) is not exactly twice the size of the base
   texture, which is what many HD texture mods produce; hence their instruction to set
   `DisableMip0Loading="1"`, at the cost of detail on every texture they did not replace. The patch now
-  leaves out only the levels that do not fit (`[Textures] SkipMismatchedMip0`). Tested on the game's real
-  engine code outside the game; reports from play are welcome.
+  leaves out only the levels that do not fit (`[Textures] SkipMismatchedMip0`), and the original
+  close-up textures of textures a mod has repainted, which would otherwise show through a few metres
+  ahead of you (`[Textures] SkipReplacedTextureMip0`).
 - **DPI awareness.** The game is marked DPI aware, so on displays scaled above 100 % Windows no longer
   reports a smaller desktop to it or blurs windowed and borderless output (`[Display] HighDpiAware`).
 - Windows no longer swaps the game window for a "Not responding" ghost during long loads
@@ -26,7 +26,13 @@ default to on. Copy the new INI too if you want them listed.
   for a known XAudio2 2.7 defect in which the DLL is unloaded while still in use
   (`[Audio] KeepXAudio2Loaded`).
 - Diagnostics: `[Debug] TraceAudio=1` logs how the game uses the sound system.
-- Windows installer: a copy of the game running from a different folder no longer blocks installing.
+- The log of the previous start is kept as `FC3PerformancePatch.previous.log`, so starting the game
+  again after a crash no longer destroys the evidence.
+- **The installer scripts are gone.** Copying the two files is the one way to install; everything the
+  patch does works from the DLL alone. If you installed 1.0.0 with `install.bat` or `install.sh`, run
+  that version's uninstaller first if you want its backups restored, then copy the new files. The
+  optional extras the installer offered (DXVK download, Control Flow Guard switch) are no longer part
+  of this project.
 
 **Unchanged from 1.0.0**
 
@@ -36,7 +42,6 @@ default to on. Copy the new INI too if you want them listed.
   restricting the rest of the process. Configurable in the INI file.
 - Enables the Large Address Aware flag (4 GB address space) on the game executable, with a backup.
 - Requests a 1 ms system timer for the game.
-- Optional installer extras on Windows: DXVK (`-EnableDXVK`), Control Flow Guard off (`-DisableCFG`).
 
 **Tested:** Windows 11 with both games; Wine 11 / Proton Experimental with the test suite.
 Frame-rate gains have not been benchmarked; see "What has been tested" in the README for the status

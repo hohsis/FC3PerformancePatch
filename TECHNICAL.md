@@ -215,7 +215,7 @@ Both executables of both games ship without `IMAGE_FILE_LARGE_ADDRESS_AWARE` (`0
 process to 2 GB of address space. The flag lives in the executable's file header and is read when the
 process is created, so it cannot be applied in memory.
 
-The DLL (`src/laa.c`) and the installers set the flag on disk and recompute the PE checksum. Because a
+The DLL (`src/laa.c`) sets the flag on disk and recomputes the PE checksum. Because a
 running image cannot be overwritten, the DLL writes a patched copy, renames the running executable to
 `<name>.exe.fc3pp-<UTC timestamp>.bak` and moves the copy into place; this also works under Wine. The
 executables are Authenticode-signed; changing the flag invalidates the signature, which has no practical
@@ -234,8 +234,7 @@ allocator defect was identified in this analysis.
   `0x1002` (AMD) and `0x8086` (Intel), alongside references to NVAPI and the AMD display library. These
   vendor-specific branches were not analysed individually and are not altered. No failing hardware check
   was observed (tested on NVIDIA only).
-- `D3D11MultithreadedRendering` is left at the user's value. The Windows installer sets it to `1` only
-  together with DXVK; the Linux installer only on request.
+- `D3D11MultithreadedRendering` is left at the user's value.
 
 ## 7. Display: fullscreen after focus loss, DPI awareness
 
@@ -447,19 +446,59 @@ engine module and not at all in the other three.
 Status: the cause is established from the crash dump and the decompiled code. The guard is tested on a
 stand-in class whose methods begin with the real instruction sequences, and on the real `FC3_d3d11.dll`
 of both games mapped into a test process: a 1024x1024 top level offered to a 2048x2048 texture through
-the game's own table is refused before any game code runs, and the following drop is swallowed. **It has
-not yet been confirmed by playing with a texture mod installed.** The DX9 renderer has its own texture
-class, which was not analysed; the guard does nothing there. Texture mods also raise memory use, which
-this guard does not address: the process has 4 GB of address space at most.
+the game's own table is refused before any game code runs, and the following drop is swallowed. In play
+(Far Cry 3, DX11, the mod above, `DisableMip0Loading="0"`) the game loads and runs where it crashed
+before, and the log shows levels of all three kinds being left out. Blood Dragon was not played with it.
+The DX9 renderer has its own texture class, which was not analysed; the guard does nothing there. Texture
+mods also raise memory use, which this guard does not address: the process has 4 GB of address space at
+most.
+
+### Original top levels of replaced textures (`[Textures] SkipReplacedTextureMip0`)
+
+The size rule leaves one case open. Where a mod repaints a texture at its original size, or under a new
+name, the game's original mip0 file still fits, so it is added, and within a few metres of the camera the
+original picture replaces the mod's. On the ground this is plain to see: the texture changes a short
+distance ahead as you walk. (With the mod's own `DisableMip0Loading="1"` it cannot happen, because no top
+level is ever loaded.)
+
+Neither the engine nor a hook on its texture class can tell such a file from a good one: both only see
+pixels of the right size. The information is in the archives. A mod is installed as `patch.fat` /
+`patch.dat`, which override every other archive, and the archives can be read without the game:
+
+- The index (`.fat`) is a sorted list of 20-byte entries: name hash, content size and compression scheme,
+  offset and stored size. Names are not stored; the hash is a CRC-64 (polynomial 0x1B, reflected) of the
+  lower-case path. Entries are stored raw or LZO1X-compressed.
+- A texture file (`.xbt`) starts with a small header that, in a base texture, names its mip0 file, and
+  that carries a 12-byte source id. In every pair of the original game (2,259 in Far Cry 3, 1,440 in
+  Blood Dragon) the base and its mip0 file have the same id.
+
+At start-up a background thread reads the indexes (35 archives with 490,000 entries take about 30 ms here)
+and looks at every base texture in `patch.fat` that names a mip0 file which only the game's own archives
+provide and whose size fits. If the game has a file of the same name, the two bases are compared (size
+and the first 16 KB of content); for a new name the source ids are compared. A base that differs was
+made from another picture, so the mip0 file is recorded by an identity that can be recomputed from what
+the engine later holds in memory: header fields including the source id, dimensions, format, size and
+the first 256 bytes of pixel data. `AddTopLevel` refuses recorded files like unfitting ones.
+
+In the surveyed mod, of 608 base textures that name a mip0 file, 91 bring their own, 382 would get an
+original of the wrong size (the crash, handled by the size rule), 38 are unchanged copies of the game's
+files, and 97 are repainted textures whose original mip0 file still fits. Those 97 include the jungle
+and coast ground textures; 96 distinct files are left out.
+
+Limits: only `patch.fat` is treated as a mod (that is where mods for this game are installed); a base is
+considered unchanged if its size and first 16 KB match the game's; and a recorded file is refused for
+every texture, so an untouched texture that shares the same mip0 file with a replaced one loses it too
+(one such case in the surveyed mod). Status: the scan is tested on archives built in memory and by the
+runtime tests on archives built on disk, and on the real installation it returns exactly the files a
+separate reference implementation finds. **The effect on screen has not been checked yet.**
 
 ## 10. Control Flow Guard
 
 None of the game binaries are built with CFG (`IMAGE_DLLCHARACTERISTICS_GUARD_CF` is clear in all of them).
 Disabling CFG per executable in Windows Exploit Protection is a frequently repeated community fix for long
 freezes in this and other games; the evidence is anecdotal and no mechanism was identified here. The
-installer offers it as an explicit option (`-DisableCFG`), records the previous state and restores it on
-uninstall. It is never applied automatically, because it lowers a security mitigation system-wide for the
-named executable.
+patch does not change it: it would lower a security mitigation for the named executable on the strength
+of anecdote.
 
 ## 11. Tests and their limits
 
@@ -467,8 +506,7 @@ named executable.
 |---|---|
 | Logic | Unit tests for every pure module; the four loop variants are executed as machine code before and after patching |
 | Real engine code | The game's own function, called in isolation from the user's DLLs (section 2); the texture guard installed on the game's real texture class table and called through it (section 9) |
-| Process integration | A 32-bit host with stand-in modules named like the engine's, in 20 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
-| Installers | Round trips in a fake Steam library on Windows and Linux; restore is compared byte for byte |
+| Process integration | A 32-bit host with stand-in modules named like the engine's, in 21 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
 | Privacy | Sources, git history and binaries are scanned for paths, account names, addresses and IDs |
 

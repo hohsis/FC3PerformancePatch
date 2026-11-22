@@ -79,7 +79,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Shellcheck
-        run: shellcheck -S warning scripts/install.sh scripts/uninstall.sh tests/install/test_install.sh tools/hooks/pre-commit tools/hooks/pre-push
+        run: shellcheck -S warning tools/hooks/pre-commit tools/hooks/pre-push
 
   release:
     name: Publish release

@@ -34,6 +34,7 @@ def ini(**kw):
         "enabled": 1, "log": 3, "fix": 1, "mode": "engine", "max_cores": 3, "smt": 0,
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
         "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0, "texguard": 1,
+        "texscan": 1,
     }
     values.update(kw)
     return (
@@ -42,7 +43,7 @@ def ini(**kw):
         "[Timing]\nTimerResolutionMs={timer}\nSleepZeroYield={sleep_yield}\n"
         "[Memory]\nApplyLargeAddressAware={laa}\n"
         "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
-        "[Textures]\nSkipMismatchedMip0={texguard}\n"
+        "[Textures]\nSkipMismatchedMip0={texguard}\nSkipReplacedTextureMip0={texscan}\n"
         "[Audio]\nKeepXAudio2Loaded={keep_xaudio}\n"
         "[Debug]\nTraceCpuApi={trace}\nTraceAudio={trace_audio}\nSimulateAffinityMask={simulate}\n"
     ).format(**values)
@@ -82,12 +83,19 @@ SCENARIOS = {
                   "the texture is 256x256 BC1, so the level must be 512x512, but the file holds 1024x1024 BC1 "
                   "(too large)",
                   "textures: the engine could not add a top mip level to a texture",
-                  "textures: 3 top mip levels added, 6 left out because they did not fit (4 too small, 1 too large, "
-                  "1 in a different pixel format), 1 not added by the engine itself; "
-                  "5 matching unload requests ignored"],
+                  "textures: the patch archive holds 2 textures with a separate top mip level; 0 bring their own, "
+                  "0 would get an original one of the wrong size, 1 an original one made for the texture they "
+                  "replace (those 1 files will be left out, 1 are intact) - 2 archives read",
+                  "textures: left out a top mip level (128x128 BC1) that was made for the original of a texture "
+                  "a mod has replaced",
+                  "textures: 4 top mip levels added, 6 left out because they did not fit (4 too small, 1 too large, "
+                  "1 in a different pixel format), 2 left out because a mod replaced their texture, "
+                  "1 not added by the engine itself; 7 matching unload requests ignored"],
                  ["ERROR"]),
     "textures-off": (HARNESS, ini(texguard=0), ["textures-off"], True,
                      ["initialised"], ["texture guard", "textures:", "ERROR"]),
+    "textures-noscan": (HARNESS, ini(texscan=0), ["textures-noscan"], True,
+                        ["texture guard active"], ["patch archive", "a mod has replaced", "ERROR"]),
     "fullscreen": (HARNESS, ini(), ["fullscreen"], True,
                    ["display: fullscreen guard attached to a swap chain of the game",
                     "display: Windows took the game out of fullscreen on focus loss",
@@ -171,9 +179,100 @@ def read_log(d):
         return f.read().decode("utf-8", "replace")
 
 
+def name_hash(name):
+    """The archives' file-name hash: CRC-64, polynomial 1Bh, reflected, of the lower-case path."""
+    crc = 0
+    for b in name.lower().encode("ascii"):
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xD800000000000000 if crc & 1 else crc >> 1
+    return crc
+
+
+def make_xbt(top_path, source_id, width, height, fourcc, pixels, seed):
+    """A texture file: header, optional path of its top mip level file, DDS image."""
+    if top_path is None:
+        path = bytes(4)
+    else:
+        path = top_path.encode("ascii") + bytes(1)
+        path += bytes(-len(path) % 4)
+    header = struct.pack("<4sIIII", b"TBX", 0x68, 0x20 + len(path), 8 if top_path else 2, 0xFFFFFF00)
+    header += bytes((source_id * 16 + i) & 0xFF for i in range(12)) + path
+    dds = bytearray(128)
+    dds[0:4] = b"DDS "
+    struct.pack_into("<I", dds, 4, 124)
+    struct.pack_into("<II", dds, 12, height, width)
+    struct.pack_into("<I", dds, 28, 1)
+    struct.pack_into("<II", dds, 76, 32, 4)
+    dds[84:88] = fourcc
+    return header + bytes(dds) + bytes((i * 13 + seed) & 0xFF for i in range(pixels))
+
+
+def write_archive(folder, name, files):
+    """Writes <name>.fat / <name>.dat holding {path: content}, everything stored."""
+    data = bytearray(1)
+    entries = []
+    for path, content in files.items():
+        entries.append((name_hash(path), len(data), len(content)))
+        data += content + bytes(3)
+    fat = struct.pack("<4sIIIII", b"2TAF", 9, 0x301, 0, 0, len(entries))
+    for h, offset, size in sorted(entries):
+        fat += struct.pack("<IIIII", h >> 32, h & 0xFFFFFFFF, 0, offset >> 2, ((offset & 3) << 30) | size)
+    with open(os.path.join(folder, name + ".fat"), "wb") as f:
+        f.write(fat)
+    with open(os.path.join(folder, name + ".dat"), "wb") as f:
+        f.write(data)
+
+
+def setup_texture_archives(d):
+    """Builds <d>/../data_win32 the way a game with a texture mod looks, and
+    leaves two top mip level files of the "game" next to the host."""
+    sep = chr(92)
+    data = os.path.join(os.path.dirname(d), "data_win32")
+    shutil.rmtree(data, ignore_errors=True)
+    os.makedirs(os.path.join(data, "worlds", "main"))
+
+    ground, ground_top_name = "tex" + sep + "ground_d.xbt", "tex" + sep + "ground_d_mip0.xbt"
+    rock, rock_top_name = "tex" + sep + "rock_d.xbt", "tex" + sep + "rock_d_mip0.xbt"
+    ground_top = make_xbt(None, 1, 128, 128, b"DXT1", 1500, 11)
+    rock_base = make_xbt(rock_top_name, 2, 64, 64, b"DXT5", 700, 20)
+    rock_top = make_xbt(None, 2, 128, 128, b"DXT5", 1500, 21)
+    # The "mod": repaints the ground (same size, header copied from the
+    # original) and carries the rock texture unchanged.
+    write_archive(data, "patch", {
+        ground: make_xbt(ground_top_name, 1, 64, 64, b"DXT1", 700, 99),
+        rock: rock_base,
+        "scripts" + sep + "note.lua": b"-- not a texture",
+    })
+    write_archive(os.path.join(data, "worlds", "main"), "main", {
+        ground: make_xbt(ground_top_name, 1, 64, 64, b"DXT1", 700, 10),
+        ground_top_name: ground_top,
+        rock: rock_base,
+        rock_top_name: rock_top,
+    })
+    # An archive without data, like the empty language archives the game ships.
+    with open(os.path.join(data, "empty.fat"), "wb") as f:
+        f.write(struct.pack("<4sIIIII", b"2TAF", 9, 0x301, 0, 0, 0))
+    open(os.path.join(data, "empty.dat"), "wb").close()
+    # What the engine has in its hands when it streams these two in.
+    with open(os.path.join(d, "stale_top.xbt"), "wb") as f:
+        f.write(ground_top)
+    with open(os.path.join(d, "fresh_top.xbt"), "wb") as f:
+        f.write(rock_top)
+
+
+# Scenarios whose host sits in <work>/<name>/bin, next to a data folder, as
+# the game sits in <game>/bin next to <game>/data_win32.
+WITH_DATA = {"textures": setup_texture_archives, "textures-noscan": setup_texture_archives}
+
+
 def run_scenario(args, name, env):
     exe, ini_text, exe_args, expect_log, must, must_not = SCENARIOS[name]
-    d = prepare(args, name, exe, ini_text)
+    if name in WITH_DATA:
+        d = prepare(args, os.path.join(name, "bin"), exe, ini_text)
+        WITH_DATA[name](d)
+    else:
+        d = prepare(args, name, exe, ini_text)
     code, out = launch(args, d, exe, exe_args, env)
     if code != 0:
         raise Failure("host exited with code %d\n%s" % (code, out.strip()))
@@ -233,6 +332,13 @@ def run_laa(args, env):
         raise Failure("second run does not run large-address-aware\n%s" % log)
     if len(glob.glob(exe + ".fc3pp-*.bak")) != 1:
         raise Failure("the second run created another backup")
+    # The log of the first run survives the second start.
+    previous = os.path.join(d, LOG.replace(".log", ".previous.log"))
+    if not os.path.exists(previous):
+        raise Failure("the log of the previous start was not kept")
+    with open(previous, "rb") as f:
+        if b"enabled the Large Address Aware flag" not in f.read():
+            raise Failure("the kept log is not the one of the previous start")
     with open(exe, "rb") as f:
         if f.read() != patched:
             raise Failure("the second run modified the executable again")

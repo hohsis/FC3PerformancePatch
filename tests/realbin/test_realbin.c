@@ -29,6 +29,7 @@
 #include "pe_file.h"
 #include "pe_image.h"
 #include "tex_rule.h"
+#include "tex_stale.h"
 #include "texguard.h"
 
 static int g_failures;
@@ -305,13 +306,13 @@ static void test_texture_guard(HMODULE mod, void **table, unsigned add_slot)
     volatile unsigned canary = 0xC0FFEE11u;
     unsigned char r;
 
-    CHECK(texguard_install(mod, "engine") == 1, "the texture guard did not install on the real module");
+    CHECK(texguard_install(mod, "engine", 0) == 1, "the texture guard did not install on the real module");
     CHECK(table[add_slot] != add_before && table[add_slot + 1] != drop_before && table[0] != destroy_before,
           "the texture class table was not changed");
     if (table[add_slot] == add_before) {
         return;
     }
-    CHECK(texguard_install(mod, "engine") == 1, "installing twice is not harmless");
+    CHECK(texguard_install(mod, "engine", 0) == 1, "installing twice is not harmless");
 
     memset(&d3d, 0, sizeof(d3d));
     d3d.vtbl = FAKE_D3D_VTBL;
@@ -601,6 +602,39 @@ static void test_executable(const wchar_t *dir, const wchar_t *name)
     free(buf);
 }
 
+/* The scan for top mip level files that belong to textures a mod has replaced,
+ * on the game's real archives. What it finds depends on the mods installed,
+ * so this checks that the archives are understood and the numbers add up. */
+static void test_archives(const wchar_t *bin_dir)
+{
+    static unsigned long long ids[4096];
+    wchar_t data_dir[MAX_PATH];
+    ts_stats stats;
+    unsigned archives = 0;
+    DWORD started = GetTickCount();
+    long count;
+
+    _snwprintf(data_dir, MAX_PATH, L"%ls\\..\\data_win32", bin_dir);
+    data_dir[MAX_PATH - 1] = L'\0';
+    if (GetFileAttributesW(data_dir) == INVALID_FILE_ATTRIBUTES) {
+        return;
+    }
+    count = tex_stale_scan_folder(data_dir, ids, 4096, &stats, &archives);
+    printf("  data archives\n");
+    CHECK(count >= 0, "the archive scan ran out of memory");
+    CHECK(archives >= 2, "only %u archives were read", archives);
+    CHECK(stats.linked == stats.own_top + stats.missing + stats.unfit + stats.unchanged + stats.stale,
+          "the categories do not add up");
+    CHECK(stats.truncated == 0, "%u identities did not fit", stats.truncated);
+    CHECK(count <= (long)stats.stale * 8, "more identities than stale pairs can produce");
+    printf("    %u archives read in %lu ms; patch archive: %u textures, %u with a separate top mip level\n", archives,
+           (unsigned long)(GetTickCount() - started), stats.textures, stats.linked);
+    printf("    of those: %u bring their own top level, %u name one that exists nowhere, %u would get an original\n"
+           "    of the wrong size, %u are the game's own files, %u replace a texture whose original top level\n"
+           "    still fits (%ld files to leave out)\n",
+           stats.own_top, stats.missing, stats.unfit, stats.unchanged, stats.stale, count);
+}
+
 static void test_directory(const wchar_t *dir)
 {
     static const wchar_t *const engine[] = {L"FC3_d3d11.dll", L"FC3.dll", L"systemdetection.dll"};
@@ -620,6 +654,7 @@ static void test_directory(const wchar_t *dir)
     for (i = 0; i < sizeof(exes) / sizeof(exes[0]); ++i) {
         test_executable(dir, exes[i]);
     }
+    test_archives(dir);
 }
 
 int wmain(int argc, wchar_t **argv)
