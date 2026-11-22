@@ -519,6 +519,7 @@ static void game_in_foreground(void)
 static void scenario_fullscreen(int guard_enabled)
 {
     HWND hidden;
+    int own_window;
     void *foreign;
     long calls;
     int i;
@@ -527,8 +528,15 @@ static void scenario_fullscreen(int guard_enabled)
         return;
     }
     hidden = CreateWindowExA(0, "STATIC", "fc3pp test", WS_POPUP, 0, 0, 16, 16, NULL, NULL, NULL, NULL);
-    CHECK(hidden != NULL, "could not create the hidden test window");
-    CHECK(GetForegroundWindow() != hidden, "the hidden test window is in the foreground");
+    own_window = hidden != NULL;
+    if (!hidden) {
+        /* No display (headless Wine in CI): windows cannot be created. The
+         * guard only ever compares the handle with the foreground window, so
+         * any value that is not the foreground window serves. */
+        hidden = (HWND)(ULONG_PTR)0x00FC3001;
+        printf("  no display: using a made-up window handle for the background case\n");
+    }
+    CHECK(GetForegroundWindow() != hidden, "the background test window is in the foreground");
 
     CHECK(fx_dxgi_open(hidden) == 0, "the engine fixture could not create its swap chain");
     CHECK(fx_dxgi_fullscreen() == 0, "a new swap chain must report windowed");
@@ -546,7 +554,9 @@ static void scenario_fullscreen(int guard_enabled)
         game_in_foreground();
         CHECK(fx_dxgi_fullscreen() == 0, "RestoreFullscreenOnFocus=0: state changed on its own");
         CHECK(dx_set_calls() == calls, "RestoreFullscreenOnFocus=0: fullscreen was requested anyway");
-        DestroyWindow(hidden);
+        if (own_window) {
+            DestroyWindow(hidden);
+        }
         return;
     }
     for (i = 0; i < 3; ++i) {
@@ -617,7 +627,9 @@ static void scenario_fullscreen(int guard_enabled)
     game_in_foreground();
     CHECK(fx_dxgi_fullscreen() == 1 && dx_state() == 1, "the recreated swap chain was not restored");
 
-    DestroyWindow(hidden);
+    if (own_window) {
+        DestroyWindow(hidden);
+    }
 }
 
 int main(int argc, char **argv)
