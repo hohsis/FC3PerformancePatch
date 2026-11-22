@@ -1,0 +1,11 @@
+#!/bin/sh
+# Audits the whole history (every blob of every commit, commit messages and
+# identities) plus the working tree before anything leaves this machine.
+# Enable with:  git config core.hooksPath tools/hooks
+for candidate in python3 python py; do
+    if "$candidate" -c "import sys" >/dev/null 2>&1; then
+        exec "$candidate" "$(git rev-parse --show-toplevel)/tools/opsec_audit.py" --history --tree --check-identity
+    fi
+done
+echo "pre-push: Python was not found, so the OPSEC audit could not run." >&2
+exit 1

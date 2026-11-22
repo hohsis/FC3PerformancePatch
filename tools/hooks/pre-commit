@@ -1,0 +1,10 @@
+#!/bin/sh
+# Refuses a commit that contains personal data, or that would be made with a
+# private e-mail address. Enable with:  git config core.hooksPath tools/hooks
+for candidate in python3 python py; do
+    if "$candidate" -c "import sys" >/dev/null 2>&1; then
+        exec "$candidate" "$(git rev-parse --show-toplevel)/tools/opsec_audit.py" --staged --check-identity
+    fi
+done
+echo "pre-commit: Python was not found, so the OPSEC audit could not run." >&2
+exit 1
