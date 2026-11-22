@@ -277,6 +277,7 @@ FX_API int fx_audio_probe(void)
 {
     typedef HRESULT(__stdcall * init_fn)(void *, UINT32, UINT32);
     typedef ULONG(__stdcall * release_fn)(void *);
+    typedef HRESULT(__stdcall * count_fn)(void *, UINT32 *);
     typedef HRESULT(__stdcall * master_fn)(void *, void **, UINT32, UINT32, UINT32, UINT32, const void *);
     typedef HRESULT(__stdcall * source_fn)(void *, void **, const fx_wave_format *, UINT32, float, void *,
                                            const void *, const void *);
@@ -294,8 +295,12 @@ FX_API int fx_audio_probe(void)
         void **vt = *(void ***)engine;
         result |= 1;
         if (SUCCEEDED(((init_fn)vt[5])(engine, 0, 0xFFFFFFFFu))) {
+            UINT32 devices = 0;
             result |= 2;
-            if (SUCCEEDED(((master_fn)vt[10])(engine, &master, 0, 0, 0, 0, NULL)) && master) {
+            /* Without sound hardware (CI) stop here: Wine's XAudio2 crashes
+             * when asked for a mastering voice on a device that does not exist. */
+            if (SUCCEEDED(((count_fn)vt[3])(engine, &devices)) && devices > 0 &&
+                SUCCEEDED(((master_fn)vt[10])(engine, &master, 0, 0, 0, 0, NULL)) && master) {
                 result |= 4;
                 if (SUCCEEDED(((source_fn)vt[8])(engine, &source, &format, 0, 2.0f, NULL, NULL, NULL)) && source) {
                     fx_voice_details details;
