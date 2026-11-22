@@ -1,0 +1,61 @@
+# ---- Build output -------------------------------------------------------
+/build/
+/build-*/
+/out/
+/dist/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+Testing/
+
+# ---- Compiled artefacts: never committed, releases come from CI ---------
+*.dll
+*.exe
+*.asi
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+*.o
+*.obj
+*.res
+*.so
+*.zip
+*.7z
+*.tar.gz
+*.tar.xz
+
+# ---- Backups, logs, runtime state --------------------------------------
+*.bak
+*.bak.*
+*.orig
+*.log
+*.dmp
+*.tmp
+
+# ---- Local-only material (game copies, RE projects, tooling) -----------
+/_local/
+/ghidra_*/
+*.gpr
+*.rep/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# ---- Local environment / editor / assistant state ----------------------
+.env
+.env.*
+*.local
+*.local.*
+.opsec-denylist
+.vscode/
+.vs/
+.idea/
+.claude/
+*.user
+*.suo
+Thumbs.db
+desktop.ini
+.DS_Store
