@@ -17,7 +17,7 @@ int main(int argc, char **argv)
     static const suite suites[] = {
         {"ini", suite_ini},         {"config", suite_config},   {"sigscan", suite_sigscan},
         {"pe_file", suite_pe_file}, {"cpu", suite_cpu},         {"patches", suite_patches},
-        {"pe_image", suite_pe_image},
+        {"pe_image", suite_pe_image}, {"fs_guard", suite_fs_guard},
     };
     size_t i;
     int ran = 0;

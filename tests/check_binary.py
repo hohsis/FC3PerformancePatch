@@ -41,7 +41,7 @@ EXPECTED_EXPORTS = {
 # The three functions the game's engine modules import from VERSION.dll.
 USED_BY_THE_GAME = ("GetFileVersionInfoA", "GetFileVersionInfoSizeA", "VerQueryValueA")
 
-ALLOWED_IMPORTS = ("kernel32.dll", "winmm.dll", "msvcrt.dll", "ucrtbase.dll")
+ALLOWED_IMPORTS = ("kernel32.dll", "winmm.dll", "user32.dll", "msvcrt.dll", "ucrtbase.dll")
 ALLOWED_IMPORT_PREFIXES = ("api-ms-win-crt-", "api-ms-win-core-")
 
 

@@ -7,7 +7,7 @@ find_package(Python3 COMPONENTS Interpreter)
 add_executable(fc3pp_unit
     unit/main.c unit/dummy_pe.c
     unit/test_ini.c unit/test_sigscan.c unit/test_pe_file.c unit/test_cpu.c
-    unit/test_patches.c unit/test_pe_image.c)
+    unit/test_patches.c unit/test_pe_image.c unit/test_fs_guard.c)
 target_link_libraries(fc3pp_unit PRIVATE fc3pp_win)
 add_test(NAME unit COMMAND fc3pp_unit)
 
@@ -40,16 +40,34 @@ endfunction()
 
 # Engine fixtures: same source, built under both engine file names. The DX9
 # one has no enumeration loop, which exercises the "signature not found" path.
+# The DX11 one imports CreateDXGIFactory1 from "dxgi.dll" through the system's
+# import library; at run time that binds to the fake dxgi.dll built below,
+# because it sits next to the host.
 add_library(fx_engine_d3d11 SHARED runtime/fixture_engine.c)
 set_target_properties(fx_engine_d3d11 PROPERTIES OUTPUT_NAME FC3_d3d11)
-target_link_libraries(fx_engine_d3d11 PRIVATE version)
+target_link_libraries(fx_engine_d3d11 PRIVATE version dxgi)
 fc3pp_runtime_target(fx_engine_d3d11)
 
 add_library(fx_engine_dx9 SHARED runtime/fixture_engine.c)
 set_target_properties(fx_engine_dx9 PROPERTIES OUTPUT_NAME FC3)
-target_compile_definitions(fx_engine_dx9 PRIVATE FX_NO_LOOP)
+target_compile_definitions(fx_engine_dx9 PRIVATE FX_NO_LOOP FX_NO_DXGI)
 target_link_libraries(fx_engine_dx9 PRIVATE version)
 fc3pp_runtime_target(fx_engine_dx9)
+
+# Fake dxgi.dll: a factory and swap chains with the real virtual table layout.
+# Nothing links against it (its import library gets a name that cannot shadow
+# the system's dxgi import library).
+add_library(fx_dxgi SHARED runtime/fixture_dxgi.c)
+set_target_properties(fx_dxgi PROPERTIES
+    OUTPUT_NAME dxgi
+    IMPORT_PREFIX "fc3pp_"
+    ARCHIVE_OUTPUT_NAME fx_dxgi_import)
+if(NOT MSVC)
+    # Export CreateDXGIFactory1 without the stdcall "@8" suffix, as dxgi.dll does.
+    target_link_options(fx_dxgi PRIVATE -Wl,--kill-at)
+endif()
+fc3pp_runtime_target(fx_dxgi)
+add_dependencies(fx_engine_d3d11 fx_dxgi)
 
 add_library(fx_sysdet SHARED runtime/fixture_sysdet.c)
 set_target_properties(fx_sysdet PROPERTIES OUTPUT_NAME systemdetection)
@@ -103,10 +121,14 @@ endif()
 
 # ---- installer / uninstaller round trips (in a throw-away fake Steam library) --------
 if(CMAKE_HOST_WIN32)
+    # Stands in for a running game in the "is the game running?" checks.
+    add_executable(fc3pp_sleeper install/sleeper.c)
+    target_link_libraries(fc3pp_sleeper PRIVATE fc3pp_options)
     add_test(NAME installer_windows
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
                 -File "${CMAKE_CURRENT_SOURCE_DIR}/install/test_install.ps1"
-                -PatchDll "$<TARGET_FILE:fc3pp_version>")
+                -PatchDll "$<TARGET_FILE:fc3pp_version>"
+                -SleeperExe "$<TARGET_FILE:fc3pp_sleeper>")
     set_tests_properties(installer_windows PROPERTIES TIMEOUT 900)
 else()
     find_program(FC3PP_BASH bash)

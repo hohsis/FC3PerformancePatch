@@ -23,6 +23,9 @@ void config_defaults(fc3pp_config *cfg)
     cfg->timer_resolution_ms = 1;
     cfg->sleep_zero_yield = 0;
     cfg->apply_large_address_aware = 1;
+    cfg->restore_fullscreen = 1;
+    cfg->high_dpi_aware = 1;
+    cfg->disable_window_ghosting = 1;
 }
 
 const char *config_mode_name(cpu_mode mode)
@@ -97,6 +100,11 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
 
     cfg->apply_large_address_aware =
         ini_get_bool(&doc, "Memory", "ApplyLargeAddressAware", cfg->apply_large_address_aware);
+
+    cfg->restore_fullscreen = ini_get_bool(&doc, "Display", "RestoreFullscreenOnFocus", cfg->restore_fullscreen);
+    cfg->high_dpi_aware = ini_get_bool(&doc, "Display", "HighDpiAware", cfg->high_dpi_aware);
+    cfg->disable_window_ghosting =
+        ini_get_bool(&doc, "Display", "DisableWindowGhosting", cfg->disable_window_ghosting);
 
     cfg->trace_cpu_api = ini_get_bool(&doc, "Debug", "TraceCpuApi", cfg->trace_cpu_api);
     cfg->simulate_affinity_mask =

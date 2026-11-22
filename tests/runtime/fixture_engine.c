@@ -10,6 +10,7 @@
  * It contains no game code.
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include <string.h>
 #include <windows.h>
 
 #include "../unit/loop_blobs.h"
@@ -157,6 +158,103 @@ FX_API void fx_sleep(unsigned ms, unsigned count)
     while (count--) {
         Sleep(ms);
     }
+}
+
+/* ---- DXGI, used the way the DX11 renderer uses it ---------------------------------
+ * The factory comes from an imported CreateDXGIFactory1; everything else goes
+ * through the objects' virtual tables by slot number. The DX9-named fixture
+ * has none of this, like the real DX9 engine module. */
+#ifndef FX_NO_DXGI
+__declspec(dllimport) HRESULT WINAPI CreateDXGIFactory1(const GUID *iid, void **factory);
+
+typedef struct fx_desc {
+    UINT width, height, refresh_num, refresh_den, format, scanline, scaling;
+    UINT sample_count, sample_quality;
+    UINT buffer_usage, buffer_count;
+    HWND output_window;
+    BOOL windowed;
+    UINT swap_effect, flags;
+} fx_desc;
+
+typedef HRESULT(WINAPI *fx_create_chain_fn)(void *self, void *device, fx_desc *desc, void **chain);
+typedef HRESULT(WINAPI *fx_set_fullscreen_fn)(void *self, BOOL fullscreen, void *target);
+typedef HRESULT(WINAPI *fx_get_fullscreen_fn)(void *self, BOOL *fullscreen, void **target);
+
+static void *g_fx_factory;
+static void *g_fx_chain;
+
+static void **fx_vtbl(void *object)
+{
+    return *(void ***)object;
+}
+#endif
+
+/* Creates the factory (once) and a swap chain for the given window. */
+FX_API int fx_dxgi_open(void *window)
+{
+#ifndef FX_NO_DXGI
+    static const GUID iid_factory1 = {0x770aae78, 0xf26f, 0x4dba, {0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87}};
+    fx_desc desc;
+
+    if (!g_fx_factory && FAILED(CreateDXGIFactory1(&iid_factory1, &g_fx_factory))) {
+        return -1;
+    }
+    memset(&desc, 0, sizeof(desc));
+    desc.width = 1280;
+    desc.height = 720;
+    desc.buffer_count = 1;
+    desc.output_window = (HWND)window;
+    desc.windowed = TRUE;
+    g_fx_chain = NULL;
+    if (FAILED(((fx_create_chain_fn)fx_vtbl(g_fx_factory)[10])(g_fx_factory, NULL, &desc, &g_fx_chain)) ||
+        !g_fx_chain) {
+        return -2;
+    }
+    return 0;
+#else
+    (void)window;
+    return -100;
+#endif
+}
+
+/* The renderer's once-per-frame question: 1 fullscreen, 0 windowed, <0 error. */
+FX_API int fx_dxgi_fullscreen(void)
+{
+#ifndef FX_NO_DXGI
+    BOOL fullscreen = FALSE;
+    void *target = NULL;
+
+    if (!g_fx_chain ||
+        FAILED(((fx_get_fullscreen_fn)fx_vtbl(g_fx_chain)[11])(g_fx_chain, &fullscreen, &target))) {
+        return -1;
+    }
+    return fullscreen ? 1 : 0;
+#else
+    return -100;
+#endif
+}
+
+FX_API int fx_dxgi_set_fullscreen(int fullscreen)
+{
+#ifndef FX_NO_DXGI
+    if (!g_fx_chain ||
+        FAILED(((fx_set_fullscreen_fn)fx_vtbl(g_fx_chain)[10])(g_fx_chain, fullscreen ? TRUE : FALSE, NULL))) {
+        return -1;
+    }
+    return 0;
+#else
+    (void)fullscreen;
+    return -100;
+#endif
+}
+
+FX_API void *fx_dxgi_chain(void)
+{
+#ifndef FX_NO_DXGI
+    return g_fx_chain;
+#else
+    return NULL;
+#endif
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

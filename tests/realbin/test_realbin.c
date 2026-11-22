@@ -365,6 +365,12 @@ static void test_engine_module(const wchar_t *dir, const wchar_t *name)
                   rep.applied == 0,
               "second patch pass was not a no-op");
     }
+    if (_wcsicmp(name, L"FC3_d3d11.dll") == 0) {
+        /* The fullscreen guard reaches the renderer's swap chain through this import. */
+        int present = pei_find_import(mod, "dxgi.dll", "CreateDXGIFactory1") != NULL;
+        CHECK(present, "the DX11 engine module does not import dxgi.dll!CreateDXGIFactory1");
+        printf("    DXGI factory import: %s\n", present ? "found (fullscreen guard can attach)" : "MISSING");
+    }
     FreeLibrary(mod);
 }
 

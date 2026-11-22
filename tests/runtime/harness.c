@@ -28,6 +28,10 @@ __declspec(dllimport) unsigned fx_glpi_cores(void);
 __declspec(dllimport) unsigned long fx_version_size(void);
 __declspec(dllimport) void *fx_load_sysdet(void);
 __declspec(dllimport) void fx_sleep(unsigned ms, unsigned count);
+__declspec(dllimport) int fx_dxgi_open(void *window);
+__declspec(dllimport) int fx_dxgi_fullscreen(void);
+__declspec(dllimport) int fx_dxgi_set_fullscreen(int fullscreen);
+__declspec(dllimport) void *fx_dxgi_chain(void);
 
 static int g_checks;
 static int g_failures;
@@ -458,6 +462,164 @@ static void scenario_clamp(const real_machine *m)
     CHECK(fx_nproc() == m->nproc, "the clamp changed the processor count");
 }
 
+/* ---- fullscreen guard -------------------------------------------------------------
+ * The fake dxgi.dll next to the host plays Windows: it changes the swap
+ * chain's fullscreen state behind the engine's back and says which window the
+ * swap chain belongs to. A hidden window of our own is never the foreground
+ * window ("the game is in the background"); whatever window is in the
+ * foreground right now stands for "the game is active". */
+
+typedef void (*dx_force_state_fn)(int);
+typedef int (*dx_state_fn)(void);
+typedef void (*dx_set_window_fn)(void *);
+typedef long (*dx_set_calls_fn)(void);
+typedef void (*dx_fail_set_fn)(int);
+typedef void *(*dx_foreign_chain_fn)(void);
+typedef int (*dx_query_fn)(void *);
+
+static dx_force_state_fn dx_force_state;
+static dx_state_fn dx_state;
+static dx_set_window_fn dx_set_window;
+static dx_set_calls_fn dx_set_calls;
+static dx_fail_set_fn dx_fail_set;
+static dx_foreign_chain_fn dx_foreign_chain;
+static dx_query_fn dx_query;
+
+static int load_fake_dxgi(void)
+{
+    HMODULE dxgi = GetModuleHandleA("dxgi.dll");
+
+    CHECK(dxgi != NULL, "dxgi.dll is not loaded");
+    if (!dxgi) {
+        return 0;
+    }
+    dx_force_state = (dx_force_state_fn)(void *)GetProcAddress(dxgi, "fxdxgi_force_state");
+    dx_state = (dx_state_fn)(void *)GetProcAddress(dxgi, "fxdxgi_state");
+    dx_set_window = (dx_set_window_fn)(void *)GetProcAddress(dxgi, "fxdxgi_set_window");
+    dx_set_calls = (dx_set_calls_fn)(void *)GetProcAddress(dxgi, "fxdxgi_set_calls");
+    dx_fail_set = (dx_fail_set_fn)(void *)GetProcAddress(dxgi, "fxdxgi_fail_set");
+    dx_foreign_chain = (dx_foreign_chain_fn)(void *)GetProcAddress(dxgi, "fxdxgi_foreign_chain");
+    dx_query = (dx_query_fn)(void *)GetProcAddress(dxgi, "fxdxgi_query");
+    CHECK(dx_force_state && dx_state && dx_set_window && dx_set_calls && dx_fail_set && dx_foreign_chain && dx_query,
+          "the loaded dxgi.dll is not the test fixture (under Wine this needs WINEDLLOVERRIDES=dxgi=n,b)");
+    return dx_force_state && dx_state && dx_set_window && dx_set_calls && dx_fail_set && dx_foreign_chain &&
+           dx_query;
+}
+
+static void game_in_background(HWND hidden)
+{
+    dx_set_window(hidden);
+}
+
+static void game_in_foreground(void)
+{
+    dx_set_window(GetForegroundWindow());
+}
+
+static void scenario_fullscreen(int guard_enabled)
+{
+    HWND hidden;
+    void *foreign;
+    long calls;
+    int i;
+
+    if (!load_fake_dxgi()) {
+        return;
+    }
+    hidden = CreateWindowExA(0, "STATIC", "fc3pp test", WS_POPUP, 0, 0, 16, 16, NULL, NULL, NULL, NULL);
+    CHECK(hidden != NULL, "could not create the hidden test window");
+    CHECK(GetForegroundWindow() != hidden, "the hidden test window is in the foreground");
+
+    CHECK(fx_dxgi_open(hidden) == 0, "the engine fixture could not create its swap chain");
+    CHECK(fx_dxgi_fullscreen() == 0, "a new swap chain must report windowed");
+
+    /* The game enters fullscreen. */
+    CHECK(fx_dxgi_set_fullscreen(1) == 0, "SetFullscreenState failed");
+    CHECK(fx_dxgi_fullscreen() == 1, "fullscreen not reported after entering it");
+    calls = dx_set_calls();
+
+    /* Alt+Tab away: Windows drops fullscreen while the window is in the background. */
+    game_in_background(hidden);
+    dx_force_state(0);
+    if (!guard_enabled) {
+        CHECK(fx_dxgi_fullscreen() == 0, "RestoreFullscreenOnFocus=0: the engine must see the real state");
+        game_in_foreground();
+        CHECK(fx_dxgi_fullscreen() == 0, "RestoreFullscreenOnFocus=0: state changed on its own");
+        CHECK(dx_set_calls() == calls, "RestoreFullscreenOnFocus=0: fullscreen was requested anyway");
+        DestroyWindow(hidden);
+        return;
+    }
+    for (i = 0; i < 3; ++i) {
+        CHECK(fx_dxgi_fullscreen() == 1, "the focus-loss drop reached the engine (poll %d)", i);
+    }
+    CHECK(dx_state() == 0, "the swap chain should really be windowed at this point");
+    CHECK(dx_set_calls() == calls, "fullscreen was requested while the game is in the background");
+
+    /* Alt+Tab back. */
+    game_in_foreground();
+    CHECK(fx_dxgi_fullscreen() == 1, "engine saw windowed when the game came back");
+    CHECK(dx_set_calls() == calls + 1, "expected exactly one request to restore fullscreen, saw %ld",
+          dx_set_calls() - calls);
+    CHECK(dx_state() == 1, "the swap chain is not fullscreen again");
+    CHECK(fx_dxgi_fullscreen() == 1, "fullscreen not reported after the restore");
+    CHECK(dx_set_calls() == calls + 1, "fullscreen requested again although it is already restored");
+
+    /* Alt+Enter with the game focused is the user's decision. */
+    game_in_foreground();
+    dx_force_state(0);
+    CHECK(fx_dxgi_fullscreen() == 0, "a toggle with the window focused was hidden from the engine");
+    CHECK(fx_dxgi_fullscreen() == 0, "the toggle did not stick");
+    game_in_background(hidden);
+    CHECK(fx_dxgi_fullscreen() == 0, "windowed game reported as fullscreen in the background");
+    game_in_foreground();
+    CHECK(fx_dxgi_fullscreen() == 0, "windowed game reported as fullscreen when focused again");
+    CHECK(dx_set_calls() == calls + 1, "fullscreen forced on a game the user switched to windowed");
+
+    /* Restoring can fail for a moment (mode change in progress): retried, not hammered. */
+    CHECK(fx_dxgi_set_fullscreen(1) == 0, "SetFullscreenState failed");
+    CHECK(fx_dxgi_fullscreen() == 1, "fullscreen not reported after re-entering it");
+    game_in_background(hidden);
+    dx_force_state(0);
+    CHECK(fx_dxgi_fullscreen() == 1, "second focus-loss drop reached the engine");
+    dx_fail_set(1);
+    calls = dx_set_calls();
+    game_in_foreground();
+    for (i = 0; i < 5; ++i) {
+        CHECK(fx_dxgi_fullscreen() == 1, "engine saw windowed while the restore is being retried");
+    }
+    CHECK(dx_set_calls() == calls + 1, "restore attempts are not rate limited (%ld in a row)", dx_set_calls() - calls);
+    CHECK(dx_state() == 0, "the failing request changed the state");
+    dx_fail_set(0);
+    Sleep(400);
+    game_in_foreground();
+    CHECK(fx_dxgi_fullscreen() == 1, "engine saw windowed during the retry");
+    CHECK(dx_set_calls() == calls + 2, "no retry after the interval (%ld requests)", dx_set_calls() - calls);
+    CHECK(dx_state() == 1, "the retry did not restore fullscreen");
+
+    /* A swap chain somebody else created (overlay, capture tool) is none of our business. */
+    game_in_background(hidden);
+    dx_force_state(0);
+    CHECK(fx_dxgi_fullscreen() == 1, "third focus-loss drop reached the engine");
+    foreign = dx_foreign_chain();
+    CHECK(foreign != NULL && foreign != fx_dxgi_chain(), "could not create a foreign swap chain");
+    CHECK(dx_query(foreign) == 0, "a swap chain that is not the game's was given the guarded answer");
+    CHECK(fx_dxgi_fullscreen() == 1, "the game's swap chain lost its guard");
+    dx_force_state(1);
+
+    /* The renderer recreates its swap chain when the window size changes. */
+    CHECK(fx_dxgi_open(hidden) == 0, "could not create a second swap chain");
+    CHECK(fx_dxgi_fullscreen() == 0, "a recreated swap chain inherited stale state");
+    CHECK(fx_dxgi_set_fullscreen(1) == 0, "SetFullscreenState failed on the second swap chain");
+    CHECK(fx_dxgi_fullscreen() == 1, "fullscreen not reported on the second swap chain");
+    game_in_background(hidden);
+    dx_force_state(0);
+    CHECK(fx_dxgi_fullscreen() == 1, "the recreated swap chain is not guarded");
+    game_in_foreground();
+    CHECK(fx_dxgi_fullscreen() == 1 && dx_state() == 1, "the recreated swap chain was not restored");
+
+    DestroyWindow(hidden);
+}
+
 int main(int argc, char **argv)
 {
     const char *scenario = argc > 1 ? argv[1] : "engine";
@@ -483,6 +645,10 @@ int main(int argc, char **argv)
         scenario_simulate(0);
     } else if (strcmp(scenario, "clamp") == 0) {
         scenario_clamp(&machine);
+    } else if (strcmp(scenario, "fullscreen") == 0) {
+        scenario_fullscreen(1);
+    } else if (strcmp(scenario, "fullscreen-off") == 0) {
+        scenario_fullscreen(0);
     } else if (strcmp(scenario, "forward-only") == 0) {
         /* nothing beyond the shared checks */
     } else {

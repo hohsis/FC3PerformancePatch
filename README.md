@@ -16,6 +16,8 @@ optionally, one flag in the game executable. No game files are included or redis
 | **Processor handling** | The engine assumes every core has exactly two threads, pins one worker thread to *every* logical processor (both halves of each core), pins the whole process to single processors while it probes the CPU, and discards any affinity you set yourself. | Gives the engine a clean set of processors: by default **6 physical cores, one thread each** (performance cores first on hybrid Intel CPUs). The rest of the process (graphics driver, DXVK, audio) stays unrestricted. Fully configurable. |
 | **2 GB memory limit** | The executables are not Large Address Aware, so the game can use only 2 GB of address space. | Enables the Large Address Aware flag (4 GB), keeping a backup of the original file. |
 | **Timer resolution** | The engine calls `Sleep(1)` hundreds of times per second and relies on someone else having requested a fine system timer. | Requests 1 ms timer resolution itself (a safety net; see *What has been tested*). |
+| **Fullscreen lost after Alt+Tab** (DX11) | Switch away from the fullscreen game and it comes back as a window, and stays one: the engine mistakes Windows dropping fullscreen on focus loss for you pressing Alt+Enter, and even overwrites its own Fullscreen setting. | Hides that drop from the engine and asks for fullscreen again when the game window is active. Alt+Enter and the in-game option still work. |
+| **Display scaling** | The executables are not marked DPI aware. On a display scaled above 100 % Windows reports a smaller desktop to the game and blurs windowed and borderless output. | Marks the process DPI aware, and stops Windows replacing the window with a "Not responding" ghost during long loads. |
 
 Details, evidence and the reverse-engineering notes are in [TECHNICAL.md](TECHNICAL.md).
 
@@ -70,17 +72,11 @@ file back, or use Steam's *Verify integrity of game files*.
 
 ## Install on Linux (Steam Proton, Steam Deck)
 
+Drag and drop works here too, with one extra step that Wine makes unavoidable:
+
 1. Download and extract the release zip (on the Steam Deck: in Desktop Mode).
-2. Run the installer from a terminal:
-
-   ```sh
-   bash install.sh
-   ```
-
-   It finds the game in your Steam libraries (native, Flatpak or Snap Steam), copies `version.dll` and
-   `FC3PerformancePatch.ini` into `<game>/bin` and enables Large Address Aware (with backups).
-   Or copy the two files into `<game>/bin` yourself.
-
+2. Copy `version.dll` and `FC3PerformancePatch.ini` into the game's `bin` folder
+   (in Steam: right-click the game > *Manage* > *Browse local files*, then open `bin`).
 3. **Set the launch option** (required, once). In Steam: right-click the game > *Properties* > *General* >
    *Launch Options*:
 
@@ -89,7 +85,11 @@ file back, or use Steam's *Verify integrity of game files*.
    ```
 
    Wine uses its own built-in `version.dll` unless told otherwise; without this line the patch is not
-   loaded. `bash install.sh --set-launch-option` can write it for you (Steam must be closed).
+   loaded, however the files got there.
+
+Prefer a script? `bash install.sh` does step 2 for you: it finds the game in your Steam libraries (native,
+Flatpak or Snap Steam), copies the two files and enables Large Address Aware with backups.
+`bash install.sh --set-launch-option` also writes the launch option (Steam must be closed).
 
 The installer **never installs DXVK on Linux**: Proton already runs the game through its own DXVK.
 
@@ -104,7 +104,7 @@ Uninstall with `bash uninstall.sh`. Run `bash install.sh --help` for all options
 After starting the game, open `bin/FC3PerformancePatch.log`. A healthy log looks like this:
 
 ```
-[INFO ] FC3PerformancePatch 1.0.0 (version.dll proxy)
+[INFO ] FC3PerformancePatch 1.1.0 (version.dll proxy)
 [INFO ] host executable: farcry3_d3d11.exe
 [INFO ] memory: process is large-address-aware (4 GB address space)
 [INFO ] timing: requested 1 ms system timer resolution for this process
@@ -134,6 +134,9 @@ Everything is in `FC3PerformancePatch.ini` (each setting is explained in the fil
 | `[Timing] TimerResolutionMs` | `1` | `0` leaves the timer alone. |
 | `[Timing] SleepZeroYield` | `0` | **Experimental.** Turns the engine's `Sleep(0)` spin-waits into real yields. Untested for gameplay benefit. |
 | `[Memory] ApplyLargeAddressAware` | `1` | Let the DLL enable the 4 GB flag on the executable. |
+| `[Display] RestoreFullscreenOnFocus` | `1` | DX11: return to fullscreen after Alt+Tab instead of staying windowed. |
+| `[Display] HighDpiAware` | `1` | Mark the game DPI aware (same as the Windows compatibility setting *High DPI scaling override: Application*). |
+| `[Display] DisableWindowGhosting` | `1` | No "Not responding" ghost window while the game loads. |
 | `[General] LogLevel` | `2` | `0` none, `1` errors, `2` normal, `3` debug. |
 
 If something misbehaves, set `[General] Enabled=0`: the DLL then acts as a plain `version.dll`.
@@ -185,6 +188,13 @@ Honest status, so you know what to expect:
 - The game itself was not run under Proton or on a Steam Deck, on AMD or Intel graphics, or on a real
   32-thread Intel processor. Reports are very welcome.
 - `SleepZeroYield`, `-DisableCFG` and DXVK-on-Windows are optional extras without measured benefit here.
+- **Fullscreen after Alt+Tab** (new in 1.1.0): the cause was found by decompiling the DX11 renderer, and
+  the fix is tested against a stand-in for DXGI that reproduces the sequence (focus loss, Windows dropping
+  fullscreen, return, Alt+Enter, failed mode switches). It has not yet been confirmed in the running game.
+  It does nothing for the DX9 executable, whose behaviour was not analysed. If it misbehaves, set
+  `RestoreFullscreenOnFocus=0`; `Borderless="1"` in `GamerProfile.xml` is an alternative that avoids
+  exclusive fullscreen altogether.
+- `DisableWindowGhosting` is a precaution; whether the game's loading screens trigger ghosting was not measured.
 
 ## Troubleshooting
 
@@ -223,8 +233,8 @@ Builds are reproducible and contain no local paths.
 
 | Suite | What it covers |
 |---|---|
-| `unit` | INI parser, signature scanner, PE/LAA/checksum code, core-selection policy, the loop patch (executed on replicas of all four compiler variants), import hooking |
-| `runtime` | The DLL loaded into a 32-bit host that mimics the game's module chain: export forwarding, processor layer, late-loaded and re-loaded modules, LAA self-patching, pass-through modes, log privacy. Runs natively and under Wine. |
+| `unit` | INI parser, signature scanner, PE/LAA/checksum code, core-selection policy, the loop patch (executed on replicas of all four compiler variants), import hooking, the fullscreen-guard state machine |
+| `runtime` | The DLL loaded into a 32-bit host that mimics the game's module chain: export forwarding, processor layer, late-loaded and re-loaded modules, LAA self-patching, the fullscreen guard against a fake `dxgi.dll`, pass-through modes, log privacy. Runs natively and under Wine. |
 | `real_game_binaries` | The fix applied to your own game files in memory and executed (skipped without a game: set `FC3PP_GAME_BIN` to one or more `bin` folders separated by `;`) |
 | `export_table` | The DLL exports exactly what the Windows `version.dll` exports; only universally available imports |
 | `installer_windows` / `installer_linux` | Install, re-install and uninstall round trips in a fake Steam library, byte-for-byte restore |

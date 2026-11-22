@@ -24,7 +24,7 @@ import sys
 HARNESS = "fc3pp_harness.exe"
 HARNESS_DX9 = "fc3pp_harness_dx9.exe"
 PASSIVE = "fc3pp_passive.exe"
-FIXTURES = ["FC3_d3d11.dll", "FC3.dll", "systemdetection.dll"]
+FIXTURES = ["FC3_d3d11.dll", "FC3.dll", "systemdetection.dll", "dxgi.dll"]
 LOG = "FC3PerformancePatch.log"
 INI = "FC3PerformancePatch.ini"
 
@@ -33,6 +33,7 @@ def ini(**kw):
     values = {
         "enabled": 1, "log": 3, "fix": 1, "mode": "engine", "max_cores": 3, "smt": 0,
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
+        "restore_fs": 1, "dpi": 1, "ghosting": 1,
     }
     values.update(kw)
     return (
@@ -40,6 +41,7 @@ def ini(**kw):
         "[CPU]\nFixCoreEnumeration={fix}\nMode={mode}\nMaxCores={max_cores}\nUseSMT={smt}\n"
         "[Timing]\nTimerResolutionMs={timer}\nSleepZeroYield={sleep_yield}\n"
         "[Memory]\nApplyLargeAddressAware={laa}\n"
+        "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
         "[Debug]\nTraceCpuApi={trace}\nSimulateAffinityMask={simulate}\n"
     ).format(**values)
 
@@ -69,6 +71,13 @@ SCENARIOS = {
               ["ERROR"]),
     "dx9-engine": (HARNESS_DX9, ini(), ["forward-only"], True,
                    ["FC3.dll:", "Mode=engine", "initialised"], ["ERROR"]),
+    "fullscreen": (HARNESS, ini(), ["fullscreen"], True,
+                   ["display: fullscreen guard attached to a swap chain of the game",
+                    "display: Windows took the game out of fullscreen on focus loss",
+                    "display: fullscreen restored", "DPI aware", "window ghosting disabled"],
+                   ["ERROR"]),
+    "fullscreen-off": (HARNESS, ini(restore_fs=0, dpi=0, ghosting=0), ["fullscreen-off"], True,
+                       ["initialised"], ["display:", "ERROR"]),
     "disabled": (HARNESS, ini(enabled=0), ["disabled"], False, [], []),
     "noini": (HARNESS, None, ["noini", "6"], True,
               ["using built-in defaults", "Mode=engine", "initialised"], ["ERROR"]),
@@ -230,8 +239,9 @@ def main():
     env = dict(os.environ)
     if args.emulator:
         # Wine prefers its built-in version.dll unless told otherwise - exactly
-        # the launch option the README tells Proton users to set.
-        env["WINEDLLOVERRIDES"] = "version=n,b"
+        # the launch option the README tells Proton users to set. The dxgi
+        # entry is for the test's fake dxgi.dll only.
+        env["WINEDLLOVERRIDES"] = "version=n,b;dxgi=n,b"
         env.setdefault("WINEDEBUG", "-all")
 
     names = args.only or (list(SCENARIOS) + ["laa"])

@@ -15,6 +15,7 @@
 #include "config.h"
 #include "cpu_shim.h"
 #include "cpu_topology.h"
+#include "display.h"
 #include "fc3pp.h"
 #include "ini.h"
 #include "laa.h"
@@ -232,6 +233,9 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
         if (g_cfg.sleep_zero_yield || g_cfg.log_level >= LOG_DEBUG) {
             hooks += shim_install_sleep_hook(mod);
         }
+        if (g_cfg.restore_fullscreen) {
+            hooks += display_install_hooks(mod);
+        }
     }
     if (!seen || applied) {
         LOGI("%s: %u import hook%s installed", name, hooks, hooks == 1 ? "" : "s");
@@ -395,6 +399,8 @@ static void fc3pp_init(HINSTANCE self)
     g_active = 1;
     apply_laa(host);
     apply_timer_resolution();
+    /* user32 is a static import of this DLL, hence already initialised. */
+    display_apply_process_settings(&g_cfg);
     setup_cpu();
 
     for (i = 0; i < sizeof(ENGINE_MODULES) / sizeof(ENGINE_MODULES[0]); ++i) {

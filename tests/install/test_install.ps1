@@ -10,9 +10,14 @@
 
 .PARAMETER PatchDll
     A built version.dll to install. Without it a stand-in file is used.
+
+.PARAMETER SleeperExe
+    A program that simply stays alive for a while (tests\install\sleeper.c). It is copied
+    under a game executable's name to test the "game is running" check. Without it those
+    checks are skipped.
 #>
 [CmdletBinding()]
-param([string] $PatchDll)
+param([string] $PatchDll, [string] $SleeperExe)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
@@ -388,6 +393,41 @@ try {
     Check ($diff.Count -eq 0) "leftovers: $($diff -join '; ')"
     $r = Install @('-Game', 'FarCry3')
     Check ($r.Output -notmatch 'Control Flow Guard') 'CFG was touched without -DisableCFG'
+
+    # ------------------------------------------------------------------------------------------
+    if ($SleeperExe) {
+        $script:Current = 'running game: a copy elsewhere does not block, the game itself does'
+        Reset-Sandbox
+        $elsewhere = Join-Path $sandbox 'Another Copy\bin'
+        New-Item -ItemType Directory -Path $elsewhere -Force | Out-Null
+        Copy-Item -LiteralPath $SleeperExe -Destination "$elsewhere\farcry3_d3d11.exe"
+        $other = Start-Process -FilePath "$elsewhere\farcry3_d3d11.exe" -WindowStyle Hidden -PassThru
+        try {
+            $r = Install @('-Game', 'FarCry3')
+            Check ($r.Code -eq 0 -and (Test-Path "$fc3\bin\version.dll")) "a game running from another folder blocked the install:`n$($r.Output)"
+            $r = Uninstall @('-Game', 'FarCry3')
+            Check ($r.Code -eq 0) "a game running from another folder blocked the uninstall:`n$($r.Output)"
+        }
+        finally {
+            Stop-Process -Id $other.Id -Force -ErrorAction SilentlyContinue
+            $other.WaitForExit(10000) | Out-Null
+        }
+
+        Reset-Sandbox
+        Copy-Item -LiteralPath $SleeperExe -Destination "$fc3\bin\farcry3_d3d11.exe" -Force
+        $before = Get-Snapshot
+        $game = Start-Process -FilePath "$fc3\bin\farcry3_d3d11.exe" -WindowStyle Hidden -PassThru
+        try {
+            $r = Install @('-Game', 'FarCry3')
+            Check ($r.Code -ne 0 -and $r.Output -match 'is running') "the installer did not refuse while the game is running:`n$($r.Output)"
+            $diff = @(Compare-Snapshot $before (Get-Snapshot))
+            Check ($diff.Count -eq 0) "the refused install changed files: $($diff -join '; ')"
+        }
+        finally {
+            Stop-Process -Id $game.Id -Force -ErrorAction SilentlyContinue
+            $game.WaitForExit(10000) | Out-Null
+        }
+    }
 
     # ------------------------------------------------------------------------------------------
     $script:Current = 'batch wrappers'

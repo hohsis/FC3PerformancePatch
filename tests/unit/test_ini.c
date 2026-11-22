@@ -164,13 +164,17 @@ static void test_config_defaults(void)
     CHECK(c.apply_large_address_aware == 1);
     CHECK(c.simulate_affinity_mask == 0);
     CHECK(c.trace_cpu_api == 0);
+    CHECK(c.restore_fullscreen == 1);
+    CHECK(c.high_dpi_aware == 1);
+    CHECK(c.disable_window_ghosting == 1);
 }
 
 static void test_config_values(void)
 {
     static const char text[] = "[General]\nEnabled=0\nLogLevel=9\n[CPU]\nMode=Process\nMaxCores=99\nUseSMT=yes\n"
                                "Cores=0,2,4-6\nFixCoreEnumeration=0\n[Timing]\nTimerResolutionMs=-3\n"
-                               "[Memory]\nApplyLargeAddressAware=off\n[Debug]\nSimulateAffinityMask=0xFFFFFFFF\n";
+                               "[Memory]\nApplyLargeAddressAware=off\n[Debug]\nSimulateAffinityMask=0xFFFFFFFF\n"
+                               "[Display]\nRestoreFullscreenOnFocus=0\nHighDpiAware=no\nDisableWindowGhosting=off\n";
     fc3pp_config c;
     CHECK(config_load_text(&c, text, sizeof(text) - 1) == 0);
     CHECK(c.enabled == 0);
@@ -184,6 +188,9 @@ static void test_config_values(void)
     CHECK(c.timer_resolution_ms == 0);
     CHECK(c.apply_large_address_aware == 0);
     CHECK_EQ_U(c.simulate_affinity_mask, 0xFFFFFFFFul);
+    CHECK(c.restore_fullscreen == 0);
+    CHECK(c.high_dpi_aware == 0);
+    CHECK(c.disable_window_ghosting == 0);
 }
 
 static void test_config_bad_values(void)

@@ -6,7 +6,7 @@
 #define FC3PP_H
 
 #define FC3PP_NAME "FC3PerformancePatch"
-#define FC3PP_VERSION "1.0.0"
+#define FC3PP_VERSION "1.1.0"
 
 #define FC3PP_INI_NAME L"FC3PerformancePatch.ini"
 #define FC3PP_LOG_NAME L"FC3PerformancePatch.log"

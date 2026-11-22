@@ -237,7 +237,79 @@ allocator defect was identified in this analysis.
 - `D3D11MultithreadedRendering` is left at the user's value. The Windows installer sets it to `1` only
   together with DXVK; the Linux installer only on request.
 
-## 7. Control Flow Guard
+## 7. Display: fullscreen after focus loss, DPI awareness
+
+### Why the DX11 game comes back from Alt+Tab as a window
+
+The game window's procedure (RVA 0x17B5FF0) does very little on `WM_ACTIVATE`: it mutes or unmutes audio
+and switches the Sticky/Toggle/Filter Keys shortcuts off and on. Nothing there touches the display mode.
+Fullscreen is managed entirely by polling. After every `Present`, the D3D11 renderer runs (RVA 0x14EDF10):
+
+```c
+swapChain->GetFullscreenState(&state, &output);
+bool now = (state == TRUE);
+if (renderer->fullscreen != now) {
+    swapChain->SetFullscreenState(now, NULL);
+    PostMessage(hwnd, WM_USER + 0x393, now, 0);
+    renderer->fullscreen = now;
+    config->Fullscreen   = now;          // the user's setting is overwritten
+}
+```
+
+That is how Alt+Enter is supported: the window association is made with `DXGI_MWA_NO_PRINT_SCREEN` only,
+so DXGI handles the key itself and the engine follows whatever state it finds. But DXGI also leaves
+exclusive fullscreen when the window loses focus. The engine cannot tell the two apart: it adopts
+"windowed", confirms it with an explicit `SetFullscreenState(FALSE)`, stores it as the setting, and the
+next function in the frame (RVA 0x14EE830) restyles and resizes the window for windowed mode. Nothing ever
+asks for fullscreen again.
+
+### The fullscreen guard (`[Display] RestoreFullscreenOnFocus`)
+
+The patch hooks the engine module's import of `CreateDXGIFactory1`, and through the factory's virtual
+table the creation of swap chains, and through the swap chain's virtual table `GetFullscreenState`. COM
+objects of one class share a table, so the hooks filter on the object: only factories returned to the
+engine and swap chains created from them are affected; an overlay's or capture tool's objects pass
+through untouched. No engine code is modified, so the same mechanism serves both games and works with
+DXVK's DXGI as well.
+
+The hook feeds a small state machine (`src/fs_guard.c`):
+
+| Observation | The engine is told | Action |
+|---|---|---|
+| Fullscreen | fullscreen | remember that the game means to be fullscreen |
+| Windowed, never was fullscreen | windowed | none |
+| Windowed, and the game window **was the foreground window** when it happened | windowed | none: Alt+Enter or the options menu |
+| Windowed, and the game window was **not** in the foreground | **fullscreen** | none while in the background |
+| ... and the window is in the foreground again | fullscreen | `SetFullscreenState(TRUE)`, at most every 250 ms |
+| 20 failed attempts | windowed | give up; the game continues as it would without the patch |
+
+The swap chain's own description (`GetDesc`) supplies the window, so a recreated swap chain or window is
+followed automatically. The engine recreates its swap chain when the output size changes; each new one
+starts with a fresh state.
+
+Known limits: a loss of fullscreen that happens while the game window is still reported as the foreground
+window (the secure desktop of a UAC prompt, for example) is indistinguishable from Alt+Enter and is passed
+on unchanged. The DX9 renderer (`FC3.dll`) uses the Direct3D 9 device-lost protocol instead and was not
+analysed.
+
+Status: derived from the decompiled code above and tested against a stand-in `dxgi.dll` that reproduces
+the sequence; **not yet confirmed in the running game**.
+
+### DPI awareness and window ghosting
+
+None of the four executables has a DPI awareness entry in its manifest, and the engine never calls
+`SetProcessDPIAware`. On a display scaled above 100 % the process is DPI-virtualised unless the user
+(or Windows, through a compatibility layer) overrides it: `GetSystemMetrics` reports a smaller desktop and
+the compositor bitmap-scales windowed and borderless output. `[Display] HighDpiAware=1` calls
+`SetProcessDPIAware` from the proxy's `DllMain`, before the engine creates its first window. System
+awareness is chosen deliberately: the engine sizes its window with `AdjustWindowRectEx`, which is only
+correct for the system DPI.
+
+`[Display] DisableWindowGhosting=1` calls `DisableProcessWindowsGhosting` so that a window whose thread is
+busy loading is not replaced by a "Not responding" ghost. This is a precaution; ghosting during the game's
+loading screens was not measured.
+
+## 8. Control Flow Guard
 
 None of the game binaries are built with CFG (`IMAGE_DLLCHARACTERISTICS_GUARD_CF` is clear in all of them).
 Disabling CFG per executable in Windows Exploit Protection is a frequently repeated community fix for long
@@ -246,16 +318,17 @@ installer offers it as an explicit option (`-DisableCFG`), records the previous 
 uninstall. It is never applied automatically, because it lowers a security mitigation system-wide for the
 named executable.
 
-## 8. Tests and their limits
+## 9. Tests and their limits
 
 | Layer | Method |
 |---|---|
 | Logic | Unit tests for every pure module; the four loop variants are executed as machine code before and after patching |
 | Real engine code | The game's own function, called in isolation from the user's DLLs (section 2) |
-| Process integration | A 32-bit host with stand-in modules named like the engine's, in 14 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, pass-through and disabled modes |
+| Process integration | A 32-bit host with stand-in modules named like the engine's, in 16 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, pass-through and disabled modes |
 | Installers | Round trips in a fake Steam library on Windows and Linux; restore is compared byte for byte |
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
 | Privacy | Sources, git history and binaries are scanned for paths, account names, addresses and IDs |
 
-Not covered: gameplay benchmarks, the game under Proton or on a Steam Deck, AMD and Intel GPUs, a physical
-32-thread Intel processor, and the Ubisoft Connect or Epic builds of the game.
+Not covered: gameplay benchmarks, the fullscreen guard in the running game (section 7), the game under
+Proton or on a Steam Deck, AMD and Intel GPUs, a physical 32-thread Intel processor, and the Ubisoft
+Connect or Epic builds of the game.

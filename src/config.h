@@ -34,6 +34,11 @@ typedef struct fc3pp_config {
     /* [Memory] */
     int apply_large_address_aware;
 
+    /* [Display] */
+    int restore_fullscreen;      /* undo the fullscreen loss caused by Alt+Tab (DX11) */
+    int high_dpi_aware;          /* mark the process DPI aware */
+    int disable_window_ghosting; /* no "Not responding" ghost window while loading */
+
     /* [Debug] */
     int trace_cpu_api;
     unsigned long simulate_affinity_mask;

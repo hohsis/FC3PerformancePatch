@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.20)
 
-project(FC3PerformancePatch VERSION 1.0.0 LANGUAGES C)
+project(FC3PerformancePatch VERSION 1.1.0 LANGUAGES C)
 
 # The game is a 32-bit x86 program; a 64-bit build of this DLL can never load.
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -53,14 +53,14 @@ endif()
 
 # ---- pure logic (no OS calls): unit-testable ------------------------------
 add_library(fc3pp_core STATIC
-    src/ini.c src/config.c src/sigscan.c src/pe_file.c src/cpu_topology.c src/patches.c)
+    src/ini.c src/config.c src/sigscan.c src/pe_file.c src/cpu_topology.c src/patches.c src/fs_guard.c)
 target_include_directories(fc3pp_core PUBLIC src)
 target_link_libraries(fc3pp_core PUBLIC fc3pp_options)
 
 # ---- Win32 layer -----------------------------------------------------------
 add_library(fc3pp_win STATIC
-    src/pe_image.c src/log.c src/cpu_shim.c src/laa.c)
-target_link_libraries(fc3pp_win PUBLIC fc3pp_core)
+    src/pe_image.c src/log.c src/cpu_shim.c src/laa.c src/display.c)
+target_link_libraries(fc3pp_win PUBLIC fc3pp_core user32)
 
 # ---- the proxy DLL -----------------------------------------------------------
 if(MSVC)

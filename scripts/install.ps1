@@ -344,11 +344,19 @@ function Get-ProfilePath($Def) {
     Join-Path $docs "My Games\$($Def.ProfileFolder)\GamerProfile.xml"
 }
 
-function Assert-GameNotRunning($Def) {
+function Assert-GameNotRunning($Def, [string] $Bin) {
+    $prefix = [IO.Path]::GetFullPath($Bin).TrimEnd('\') + '\'
     foreach ($exe in $Def.Exes) {
         $name = [IO.Path]::GetFileNameWithoutExtension($exe)
-        if (Get-Process -Name $name -ErrorAction SilentlyContinue) {
-            throw "$($Def.Name) is running ($exe). Close the game and run this again."
+        foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            # Only a game started from THIS folder keeps its files in use; a second
+            # copy elsewhere does not. A process whose location cannot be read
+            # (started elevated) is treated as this one, to be safe.
+            $path = $null
+            try { $path = $process.Path } catch { $path = $null }
+            if (-not $path -or $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "$($Def.Name) is running ($exe). Close the game and run this again."
+            }
         }
     }
 }
@@ -372,7 +380,7 @@ function Read-Manifest([string] $Bin) {
 }
 
 function Write-Manifest([string] $Bin, $Manifest) {
-    $Manifest.patchVersion = '1.0.0'
+    $Manifest.patchVersion = '1.1.0'
     $Manifest.updatedUtc = (Get-Date).ToUniversalTime().ToString('s') + 'Z'
     ($Manifest | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath (Join-Path $Bin $ManifestName) -Encoding UTF8
 }
@@ -487,7 +495,7 @@ function Install-Game($Target) {
     $bin = Join-Path $Target.Root 'bin'
     Write-Host ''
     Write-Host "$($def.Name)"
-    Assert-GameNotRunning $def
+    Assert-GameNotRunning $def $bin
     $manifest = Read-Manifest $bin
     $manifest.game = $def.Id
 
@@ -626,7 +634,7 @@ function Uninstall-Game($Target) {
     $bin = Join-Path $Target.Root 'bin'
     Write-Host ''
     Write-Host "$($def.Name)"
-    Assert-GameNotRunning $def
+    Assert-GameNotRunning $def $bin
     $manifest = Read-Manifest $bin
     $did = $false
 

@@ -538,7 +538,7 @@ install_game() {
         print_launch_option "$name"
     fi
 
-    manifest_set "$manifest" patch_version "1.0.0"
+    manifest_set "$manifest" patch_version "1.1.0"
     say "$name: done"
 }
 
