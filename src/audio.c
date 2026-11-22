@@ -35,6 +35,7 @@
 #include "vtable.h"
 
 /* IXAudio2 */
+#define SLOT_ENGINE_GET_DEVICE_COUNT 3
 #define SLOT_ENGINE_GET_DEVICE_DETAILS 4
 #define SLOT_ENGINE_CREATE_SOURCE_VOICE 8
 #define SLOT_ENGINE_CREATE_SUBMIX_VOICE 9
@@ -76,6 +77,7 @@ typedef struct xa_sends {
 #pragma pack(pop)
 
 typedef HRESULT(WINAPI *co_create_fn)(REFCLSID, LPUNKNOWN, DWORD, REFIID, LPVOID *);
+typedef HRESULT(__stdcall *get_device_count_fn)(void *self, UINT32 *count);
 typedef HRESULT(__stdcall *get_device_details_fn)(void *self, UINT32 index, xa_device_details *details);
 typedef HRESULT(__stdcall *create_source_fn)(void *self, void **voice, const xa_format *format, UINT32 flags,
                                              float max_ratio, void *callback, const xa_sends *sends,
@@ -295,8 +297,18 @@ static void log_device(void *engine, UINT32 index)
 {
     static xa_device_details details; /* 1 KB: keep it off the stack; guarded by the caller being rare */
     get_device_details_fn get_details = (get_device_details_fn)VT_OF(engine)[SLOT_ENGINE_GET_DEVICE_DETAILS];
+    get_device_count_fn get_count = (get_device_count_fn)VT_OF(engine)[SLOT_ENGINE_GET_DEVICE_COUNT];
+    UINT32 count = 0;
     HRESULT hr;
 
+    /* Ask first: Wine's implementation crashes when asked for the details of
+     * a device that does not exist (no sound hardware, as on a CI machine). */
+    hr = get_count(engine, &count);
+    if (FAILED(hr) || index >= count) {
+        LOGI("audio: output device %lu does not exist (%lu device%s available)", (unsigned long)index,
+             (unsigned long)count, count == 1 ? "" : "s");
+        return;
+    }
     memset(&details, 0, sizeof(details));
     hr = get_details(engine, index, &details);
     if (FAILED(hr)) {
