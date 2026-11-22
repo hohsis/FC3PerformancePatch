@@ -33,7 +33,7 @@ def ini(**kw):
     values = {
         "enabled": 1, "log": 3, "fix": 1, "mode": "engine", "max_cores": 3, "smt": 0,
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
-        "restore_fs": 1, "dpi": 1, "ghosting": 1,
+        "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0,
     }
     values.update(kw)
     return (
@@ -42,7 +42,8 @@ def ini(**kw):
         "[Timing]\nTimerResolutionMs={timer}\nSleepZeroYield={sleep_yield}\n"
         "[Memory]\nApplyLargeAddressAware={laa}\n"
         "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
-        "[Debug]\nTraceCpuApi={trace}\nSimulateAffinityMask={simulate}\n"
+        "[Audio]\nKeepXAudio2Loaded={keep_xaudio}\n"
+        "[Debug]\nTraceCpuApi={trace}\nTraceAudio={trace_audio}\nSimulateAffinityMask={simulate}\n"
     ).format(**values)
 
 
@@ -223,6 +224,47 @@ def run_laa(args, env):
     return out
 
 
+def run_audio(args, env):
+    """XAudio2 keep-loaded guard and trace, as far as this machine has XAudio2 2.7."""
+    d = prepare(args, "audio", HARNESS, ini(trace_audio=1))
+    code, out = launch(args, d, HARNESS, ["audio"], env)
+    if code != 0:
+        raise Failure("host exited with code %d\n%s" % (code, out.strip()))
+    log = read_log(d) or ""
+    stage = -1
+    for line in out.splitlines():
+        if line.startswith("audio stage:"):
+            stage = int(line.split(":")[1])
+    if stage < 0:
+        raise Failure("the harness did not report an audio stage\n%s" % out)
+    expect = ["audio: trace enabled"]
+    if stage & 1:
+        expect += ["will stay loaded until the game exits", "audio: trace attached to XAudio2 engine #1"]
+    else:
+        expect += ["the game could not create XAudio2 2.7"]
+    if stage & 4:
+        expect += ["audio: output device 0:", "audio: mastering voice requested with 0 channels, 0 Hz",
+                   "audio: mastering voice input is"]
+    if stage & 8:
+        expect += ["audio: first source voice with PCM, 1 channel, 22050 Hz, 16 bit",
+                   "audio: 1 source voices created in 1 format"]
+    if stage & 16:
+        expect += ["audio: output matrix 1 -> "]
+    for s in expect:
+        if s not in log:
+            raise Failure("stage %d: log does not contain %r\n--- log ---\n%s" % (stage, s, log))
+    check_log_privacy(log, args.work_dir)
+
+    # Both features off: the import is left alone and nothing is said about audio.
+    d = prepare(args, "audio-off", HARNESS, ini(keep_xaudio=0))
+    code, out2 = launch(args, d, HARNESS, ["audio-off"], env)
+    if code != 0:
+        raise Failure("audio-off: host exited with code %d\n%s" % (code, out2.strip()))
+    if "audio:" in (read_log(d) or ""):
+        raise Failure("audio-off: the log mentions audio although both features are off")
+    return out + "(XAudio2 stage %d) 0 failures" % stage
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin-dir", required=True)
@@ -244,11 +286,16 @@ def main():
         env["WINEDLLOVERRIDES"] = "version=n,b;dxgi=n,b"
         env.setdefault("WINEDEBUG", "-all")
 
-    names = args.only or (list(SCENARIOS) + ["laa"])
+    names = args.only or (list(SCENARIOS) + ["laa", "audio"])
     failed = 0
     for name in names:
         try:
-            out = run_laa(args, env) if name == "laa" else run_scenario(args, name, env)
+            if name == "laa":
+                out = run_laa(args, env)
+            elif name == "audio":
+                out = run_audio(args, env)
+            else:
+                out = run_scenario(args, name, env)
             summary = [line for line in out.splitlines() if "checks" in line or "failures" in line]
             print("[ OK ] %-18s %s" % (name, summary[-1].strip() if summary else ""))
         except Failure as e:

@@ -309,7 +309,51 @@ correct for the system DPI.
 busy loading is not replaced by a "Not responding" ghost. This is a precaution; ghosting during the game's
 loading screens was not measured.
 
-## 8. Control Flow Guard
+## 8. Audio
+
+### What the game ships and how it plays it
+
+The sound engine is Ubisoft's DARE, rendering through **XAudio2 2.7** (`XAudio2_7.dll`, DirectX June 2010
+runtime), created with `CoCreateInstance`. A second XAudio2 instance (8 kHz mono) serves voice chat.
+
+The engine side is not the bottleneck. The mastering voice and every submix voice are created with the
+constant 48000 Hz (RVA 0x20BBED4) and six channels (5.1); source voices are created with a maximum pitch
+ratio of 6. XAudio2 resamples each sound to 48 kHz and folds the 5.1 mix down to whatever the output
+device has. The device's own channel count is never queried.
+
+The sounds themselves are low-rate. A survey of the Steam release (sound objects parsed straight from the
+archives; LZO-compressed packages were not unpacked, so counts are a large sample, not a census):
+
+| Content | Container | Codec | Sample rates found |
+|---|---|---|---|
+| English dialogue (9,461 clips) | `fc3_main_english.dat`, `.spk` packages | Ogg Vorbis, mono, 40-48 kbit/s | 16 kHz: 76 %, 22.05 kHz: 24 %, a few at 11 kHz |
+| Effects and ambience held in memory (935 headers parsed) | `fc3_main.dat`, `.spk` packages | Vorbis and a second, non-Vorbis format | 24 kHz: 42 %, 32 kHz: 51 %, 48 kHz: under 2 % |
+| Streamed music and ambience (545 streams) | `sound.dat`, stream objects | Ogg Vorbis, 90-112 kbit/s stereo | 32 kHz: 66 %, 24 kHz: 31 %, 11 kHz: 3 % |
+
+A 16 kHz recording contains nothing above 8 kHz and a 32 kHz one nothing above 16 kHz, so dialogue in
+particular sounds band-limited however it is played back. No patch can restore what was never shipped;
+nothing in this project alters the sound.
+
+Not established: the interpolation quality of XAudio2 2.7's sample-rate converter, the exact 5.1 to stereo
+matrix it applies at the mastering voice, and whether DARE adapts its panning to the output device.
+`[Debug] TraceAudio=1` logs the device format, the mixer set-up, the format of every kind of source voice
+and the first output matrices, to answer those questions on a given system. It never logs the device name.
+
+### Keeping XAudio2 loaded (`[Audio] KeepXAudio2Loaded`)
+
+XAudio2 2.7 has a known defect, described in "Known Issues: XAudio 2.7" on the DirectX SDK blog: it relies
+on COM reference counting for its lifetime, and in some situations, normally at exit, the DLL is unloaded
+before the XAudio2 objects are completely destroyed, which ends in an access violation. The published
+remedy is for the application to hold its own reference to the DLL for as long as it uses XAudio2.
+Players report the game crashing 10 to 15 minutes into a session with the faulting module
+`XAudio2_7.dll_unloaded`. The patch hooks the engine's `CoCreateInstance` import and pins the module that
+implements the first XAudio2 object (found through the object's virtual table, so it also works with
+Wine's implementation). Pinning has no effect other than keeping the DLL mapped until the process ends.
+
+The crash was not reproduced in this analysis. The reports name the same unloaded DLL, but they describe
+a crash in mid-session rather than at exit, so the link to the known defect is plausible, not proven.
+
+## 9. Control Flow Guard
 
 None of the game binaries are built with CFG (`IMAGE_DLLCHARACTERISTICS_GUARD_CF` is clear in all of them).
 Disabling CFG per executable in Windows Exploit Protection is a frequently repeated community fix for long
@@ -318,13 +362,13 @@ installer offers it as an explicit option (`-DisableCFG`), records the previous 
 uninstall. It is never applied automatically, because it lowers a security mitigation system-wide for the
 named executable.
 
-## 9. Tests and their limits
+## 10. Tests and their limits
 
 | Layer | Method |
 |---|---|
 | Logic | Unit tests for every pure module; the four loop variants are executed as machine code before and after patching |
 | Real engine code | The game's own function, called in isolation from the user's DLLs (section 2) |
-| Process integration | A 32-bit host with stand-in modules named like the engine's, in 16 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, pass-through and disabled modes |
+| Process integration | A 32-bit host with stand-in modules named like the engine's, in 18 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
 | Installers | Round trips in a fake Steam library on Windows and Linux; restore is compared byte for byte |
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
 | Privacy | Sources, git history and binaries are scanned for paths, account names, addresses and IDs |

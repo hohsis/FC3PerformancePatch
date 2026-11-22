@@ -17,6 +17,7 @@ optionally, one flag in the game executable. No game files are included or redis
 | **2 GB memory limit** | The executables are not Large Address Aware, so the game can use only 2 GB of address space. | Enables the Large Address Aware flag (4 GB), keeping a backup of the original file. |
 | **Timer resolution** | The engine calls `Sleep(1)` hundreds of times per second and relies on someone else having requested a fine system timer. | Requests 1 ms timer resolution itself (a safety net; see *What has been tested*). |
 | **Fullscreen lost after Alt+Tab** (DX11) | Switch away from the fullscreen game and it comes back as a window, and stays one: the engine mistakes Windows dropping fullscreen on focus loss for you pressing Alt+Enter, and even overwrites its own Fullscreen setting. | Hides that drop from the engine and asks for fullscreen again when the game window is active. Alt+Enter and the in-game option still work. |
+| **Sound engine crash** | The game's sound runs on XAudio2 2.7, which has a known defect: in some situations `XAudio2_7.dll` is unloaded while it is still in use. Players report crashes naming `XAudio2_7.dll_unloaded`. | Keeps the DLL loaded until the game exits. The sound itself is not changed. |
 | **Display scaling** | The executables are not marked DPI aware. On a display scaled above 100 % Windows reports a smaller desktop to the game and blurs windowed and borderless output. | Marks the process DPI aware, and stops Windows replacing the window with a "Not responding" ghost during long loads. |
 
 Details, evidence and the reverse-engineering notes are in [TECHNICAL.md](TECHNICAL.md).
@@ -137,6 +138,8 @@ Everything is in `FC3PerformancePatch.ini` (each setting is explained in the fil
 | `[Display] RestoreFullscreenOnFocus` | `1` | DX11: return to fullscreen after Alt+Tab instead of staying windowed. |
 | `[Display] HighDpiAware` | `1` | Mark the game DPI aware (same as the Windows compatibility setting *High DPI scaling override: Application*). |
 | `[Display] DisableWindowGhosting` | `1` | No "Not responding" ghost window while the game loads. |
+| `[Audio] KeepXAudio2Loaded` | `1` | Keep `XAudio2_7.dll` loaded for the whole session (see above). |
+| `[Debug] TraceAudio` | `0` | Log the sound device format, the mixer set-up and the sample rates of the sounds played. |
 | `[General] LogLevel` | `2` | `0` none, `1` errors, `2` normal, `3` debug. |
 
 If something misbehaves, set `[General] Enabled=0`: the DLL then acts as a plain `version.dll`.
@@ -194,6 +197,12 @@ Honest status, so you know what to expect:
   It does nothing for the DX9 executable, whose behaviour was not analysed. If it misbehaves, set
   `RestoreFullscreenOnFocus=0`; `Borderless="1"` in `GamerProfile.xml` is an alternative that avoids
   exclusive fullscreen altogether.
+- `KeepXAudio2Loaded` applies the published remedy for the XAudio2 2.7 unload defect, which is described
+  as normally striking at exit. The crashes players report 10 to 15 minutes into a session name the same
+  unloaded DLL, but that crash was not reproduced here, so whether this cures it is unconfirmed.
+- **Sound quality** cannot be improved by a patch: the game mixes at 48 kHz, but the shipped sounds are
+  low-rate recordings (dialogue 16 and 22 kHz, effects 24 and 32 kHz, music 32 kHz). See
+  [TECHNICAL.md](TECHNICAL.md#8-audio).
 - `DisableWindowGhosting` is a precaution; whether the game's loading screens trigger ghosting was not measured.
 
 ## Troubleshooting

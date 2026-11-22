@@ -16,6 +16,10 @@ default to on. Copy the new INI too if you want them listed.
   reports a smaller desktop to it or blurs windowed and borderless output (`[Display] HighDpiAware`).
 - Windows no longer swaps the game window for a "Not responding" ghost during long loads
   (`[Display] DisableWindowGhosting`).
+- The game's sound library (`XAudio2_7.dll`) is kept loaded for the whole session, the published remedy
+  for a known XAudio2 2.7 defect in which the DLL is unloaded while still in use
+  (`[Audio] KeepXAudio2Loaded`).
+- Diagnostics: `[Debug] TraceAudio=1` logs how the game uses the sound system.
 - Windows installer: a copy of the game running from a different folder no longer blocks installing.
 
 **Unchanged from 1.0.0**

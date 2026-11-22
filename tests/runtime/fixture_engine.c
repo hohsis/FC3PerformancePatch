@@ -257,6 +257,70 @@ FX_API void *fx_dxgi_chain(void)
 #endif
 }
 
+/* ---- XAudio2 2.7, created and used the way the sound engine does ------------------
+ * Returns a bit mask of how far it got: 1 engine created, 2 initialised,
+ * 4 mastering voice, 8 source voice, 16 output matrix set. 0 means XAudio2 2.7
+ * is not installed (it comes with the DirectX June 2010 runtime). Nothing is
+ * played. */
+#pragma pack(push, 1)
+typedef struct fx_wave_format {
+    WORD tag, channels;
+    DWORD rate, bytes_per_second;
+    WORD block_align, bits, extra_size;
+} fx_wave_format;
+typedef struct fx_voice_details {
+    UINT32 flags, channels, rate;
+} fx_voice_details;
+#pragma pack(pop)
+
+FX_API int fx_audio_probe(void)
+{
+    typedef HRESULT(__stdcall * init_fn)(void *, UINT32, UINT32);
+    typedef ULONG(__stdcall * release_fn)(void *);
+    typedef HRESULT(__stdcall * master_fn)(void *, void **, UINT32, UINT32, UINT32, UINT32, const void *);
+    typedef HRESULT(__stdcall * source_fn)(void *, void **, const fx_wave_format *, UINT32, float, void *,
+                                           const void *, const void *);
+    typedef void(__stdcall * details_fn)(void *, fx_voice_details *);
+    typedef HRESULT(__stdcall * matrix_fn)(void *, void *, UINT32, UINT32, const float *, UINT32);
+    typedef void(__stdcall * destroy_fn)(void *);
+    static const GUID clsid = {0x5a508685, 0xa254, 0x4fba, {0x9b, 0x82, 0x9a, 0x24, 0xb0, 0x03, 0x06, 0xaf}};
+    static const GUID iid = {0x8bcf1f58, 0x9fe7, 0x4583, {0x8a, 0xc6, 0xe2, 0xad, 0xc4, 0x65, 0xc8, 0xbb}};
+    static const fx_wave_format format = {1, 1, 22050, 44100, 2, 16, 0};
+    void *engine = NULL, *master = NULL, *source = NULL;
+    HRESULT com = CoInitializeEx(NULL, 0);
+    int result = 0;
+
+    if (SUCCEEDED(CoCreateInstance(&clsid, NULL, 1, &iid, &engine)) && engine) {
+        void **vt = *(void ***)engine;
+        result |= 1;
+        if (SUCCEEDED(((init_fn)vt[5])(engine, 0, 0xFFFFFFFFu))) {
+            result |= 2;
+            if (SUCCEEDED(((master_fn)vt[10])(engine, &master, 0, 0, 0, 0, NULL)) && master) {
+                result |= 4;
+                if (SUCCEEDED(((source_fn)vt[8])(engine, &source, &format, 0, 2.0f, NULL, NULL, NULL)) && source) {
+                    fx_voice_details details;
+                    float matrix[8] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f};
+                    result |= 8;
+                    memset(&details, 0, sizeof(details));
+                    ((details_fn)(*(void ***)master)[0])(master, &details);
+                    if (details.channels >= 1 && details.channels <= 8 &&
+                        SUCCEEDED(((matrix_fn)(*(void ***)source)[16])(source, NULL, 1, details.channels, matrix,
+                                                                       0))) {
+                        result |= 16;
+                    }
+                    ((destroy_fn)(*(void ***)source)[18])(source);
+                }
+                ((destroy_fn)(*(void ***)master)[18])(master);
+            }
+        }
+        ((release_fn)vt[2])(engine);
+    }
+    if (SUCCEEDED(com)) {
+        CoUninitialize();
+    }
+    return result;
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
     (void)instance;

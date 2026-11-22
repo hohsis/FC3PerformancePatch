@@ -32,6 +32,7 @@ __declspec(dllimport) int fx_dxgi_open(void *window);
 __declspec(dllimport) int fx_dxgi_fullscreen(void);
 __declspec(dllimport) int fx_dxgi_set_fullscreen(int fullscreen);
 __declspec(dllimport) void *fx_dxgi_chain(void);
+__declspec(dllimport) int fx_audio_probe(void);
 
 static int g_checks;
 static int g_failures;
@@ -661,6 +662,17 @@ int main(int argc, char **argv)
         scenario_fullscreen(1);
     } else if (strcmp(scenario, "fullscreen-off") == 0) {
         scenario_fullscreen(0);
+    } else if (strcmp(scenario, "audio") == 0 || strcmp(scenario, "audio-off") == 0) {
+        /* XAudio2 2.7 may not be installed (CI) or have no device to play on;
+         * what must hold everywhere is that the patch does not get in the way.
+         * The test driver matches the log against the reported stage. */
+        int stage = fx_audio_probe();
+        printf("audio stage: %d\n", stage);
+        CHECK(stage >= 0 && stage <= 31, "XAudio2 probe returned %d", stage);
+        if ((stage & 1) && strcmp(scenario, "audio") == 0) {
+            CHECK(GetModuleHandleA("XAudio2_7.dll") != NULL,
+                  "XAudio2_7.dll was unloaded although the patch is meant to keep it loaded");
+        }
     } else if (strcmp(scenario, "forward-only") == 0) {
         /* nothing beyond the shared checks */
     } else {

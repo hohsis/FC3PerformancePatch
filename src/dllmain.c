@@ -12,6 +12,7 @@
 #include <string.h>
 #include <windows.h>
 
+#include "audio.h"
 #include "config.h"
 #include "cpu_shim.h"
 #include "cpu_topology.h"
@@ -236,6 +237,7 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
         if (g_cfg.restore_fullscreen) {
             hooks += display_install_hooks(mod);
         }
+        hooks += audio_install(mod, &g_cfg);
     }
     if (!seen || applied) {
         LOGI("%s: %u import hook%s installed", name, hooks, hooks == 1 ? "" : "s");
@@ -430,6 +432,7 @@ static void fc3pp_shutdown(int process_terminating)
          * write the closing lines without taking any, and free nothing. */
         log_set_terminating();
         shim_log_stats();
+        audio_log_stats();
         LOGI("process exit");
         return;
     }
@@ -438,6 +441,7 @@ static void fc3pp_shutdown(int process_terminating)
         g_timer_period = 0;
     }
     shim_log_stats();
+    audio_log_stats();
     LOGI("unloaded");
     log_shutdown();
     proxy_shutdown();

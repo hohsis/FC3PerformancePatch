@@ -39,8 +39,12 @@ typedef struct fc3pp_config {
     int high_dpi_aware;          /* mark the process DPI aware */
     int disable_window_ghosting; /* no "Not responding" ghost window while loading */
 
+    /* [Audio] */
+    int keep_xaudio2_loaded; /* pin XAudio2_7.dll (documented premature-unload defect) */
+
     /* [Debug] */
     int trace_cpu_api;
+    int trace_audio;
     unsigned long simulate_affinity_mask;
 
     size_t malformed_lines;

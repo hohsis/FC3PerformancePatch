@@ -26,6 +26,7 @@ void config_defaults(fc3pp_config *cfg)
     cfg->restore_fullscreen = 1;
     cfg->high_dpi_aware = 1;
     cfg->disable_window_ghosting = 1;
+    cfg->keep_xaudio2_loaded = 1;
 }
 
 const char *config_mode_name(cpu_mode mode)
@@ -106,7 +107,10 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
     cfg->disable_window_ghosting =
         ini_get_bool(&doc, "Display", "DisableWindowGhosting", cfg->disable_window_ghosting);
 
+    cfg->keep_xaudio2_loaded = ini_get_bool(&doc, "Audio", "KeepXAudio2Loaded", cfg->keep_xaudio2_loaded);
+
     cfg->trace_cpu_api = ini_get_bool(&doc, "Debug", "TraceCpuApi", cfg->trace_cpu_api);
+    cfg->trace_audio = ini_get_bool(&doc, "Debug", "TraceAudio", cfg->trace_audio);
     cfg->simulate_affinity_mask =
         ini_get_uint(&doc, "Debug", "SimulateAffinityMask", cfg->simulate_affinity_mask) & 0xFFFFFFFFul;
 

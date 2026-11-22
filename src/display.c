@@ -20,8 +20,12 @@
 #include "fs_guard.h"
 #include "log.h"
 #include "pe_image.h"
+#include "vtable.h"
 
-#define MAX_VTABLES 4
+/* Slot numbers in the IDXGIFactory and IDXGISwapChain virtual tables. */
+#define SLOT_FACTORY_CREATE_SWAP_CHAIN 10
+#define SLOT_CHAIN_GET_FULLSCREEN_STATE 11
+
 #define MAX_FACTORIES 4
 #define MAX_CHAINS 8
 
@@ -29,11 +33,6 @@ typedef HRESULT(WINAPI *create_factory_fn)(REFIID riid, void **factory);
 typedef HRESULT(STDMETHODCALLTYPE *create_swap_chain_fn)(IDXGIFactory *self, IUnknown *device,
                                                         DXGI_SWAP_CHAIN_DESC *desc, IDXGISwapChain **chain);
 typedef HRESULT(STDMETHODCALLTYPE *get_fullscreen_fn)(IDXGISwapChain *self, BOOL *fullscreen, IDXGIOutput **target);
-
-typedef struct vtable_hook {
-    const void *vtbl; /* the table that was patched */
-    void *original;   /* the slot's previous content */
-} vtable_hook;
 
 typedef struct chain_entry {
     IDXGISwapChain *chain;
@@ -43,8 +42,8 @@ typedef struct chain_entry {
 static SRWLOCK g_lock = SRWLOCK_INIT;
 static create_factory_fn g_orig_create_factory;
 static create_factory_fn g_orig_create_factory1;
-static vtable_hook g_factory_vtables[MAX_VTABLES];
-static vtable_hook g_chain_vtables[MAX_VTABLES];
+static vt_hook g_factory_vtables[VT_MAX_TABLES];
+static vt_hook g_chain_vtables[VT_MAX_TABLES];
 static IDXGIFactory *g_factories[MAX_FACTORIES];
 static chain_entry g_chains[MAX_CHAINS];
 static unsigned g_next_chain;
@@ -77,40 +76,6 @@ void display_apply_process_settings(const fc3pp_config *cfg)
 }
 
 /* ---- bookkeeping (call with g_lock held) ----------------------------------------- */
-
-static void *find_original(const vtable_hook *hooks, const void *vtbl)
-{
-    unsigned i;
-    for (i = 0; i < MAX_VTABLES; ++i) {
-        if (hooks[i].vtbl == vtbl) {
-            return hooks[i].original;
-        }
-    }
-    return NULL;
-}
-
-/* Replaces one virtual table slot, remembering what was there. Returns 1 when
- * the slot is (now) hooked. */
-static int hook_slot(vtable_hook *hooks, const void *vtbl, void **slot, void *replacement)
-{
-    unsigned i;
-
-    if (*slot == replacement) {
-        return find_original(hooks, vtbl) != NULL;
-    }
-    for (i = 0; i < MAX_VTABLES; ++i) {
-        if (!hooks[i].vtbl) {
-            void *original = *slot;
-            if (mem_patch(slot, &replacement, sizeof(replacement)) != 0) {
-                return 0;
-            }
-            hooks[i].original = original;
-            hooks[i].vtbl = vtbl;
-            return 1;
-        }
-    }
-    return 0; /* more implementations than anyone has ever seen in one process */
-}
 
 static int is_engine_factory(const IDXGIFactory *factory)
 {
@@ -146,6 +111,24 @@ static int chain_window_is_active(IDXGISwapChain *chain)
     return GetForegroundWindow() == desc.OutputWindow && !IsIconic(desc.OutputWindow);
 }
 
+/* Reports the display mode the game ended up with: the refresh rate in
+ * particular is chosen by DXGI, not by the player. */
+static void log_fullscreen_mode(IDXGISwapChain *chain)
+{
+    DXGI_SWAP_CHAIN_DESC desc;
+
+    if (FAILED(IDXGISwapChain_GetDesc(chain, &desc))) {
+        return;
+    }
+    if (desc.BufferDesc.RefreshRate.Denominator) {
+        LOGI("display: fullscreen at %ux%u, %.2f Hz", desc.BufferDesc.Width, desc.BufferDesc.Height,
+             (double)desc.BufferDesc.RefreshRate.Numerator / (double)desc.BufferDesc.RefreshRate.Denominator);
+    } else {
+        LOGI("display: fullscreen at %ux%u, refresh rate left to the system", desc.BufferDesc.Width,
+             desc.BufferDesc.Height);
+    }
+}
+
 static HRESULT STDMETHODCALLTYPE hook_get_fullscreen_state(IDXGISwapChain *self, BOOL *fullscreen,
                                                            IDXGIOutput **target)
 {
@@ -154,11 +137,11 @@ static HRESULT STDMETHODCALLTYPE hook_get_fullscreen_state(IDXGISwapChain *self,
     fs_decision d;
     BOOL real = FALSE;
     HRESULT hr;
-    int tracked, active;
+    int tracked, active, entered = 0;
     DWORD now;
 
     AcquireSRWLockShared(&g_lock);
-    original = (get_fullscreen_fn)find_original(g_chain_vtables, self->lpVtbl);
+    original = (get_fullscreen_fn)vt_original(g_chain_vtables, self->lpVtbl);
     tracked = find_chain(self) != NULL;
     ReleaseSRWLockShared(&g_lock);
     if (!original) {
@@ -178,6 +161,7 @@ static HRESULT STDMETHODCALLTYPE hook_get_fullscreen_state(IDXGISwapChain *self,
     AcquireSRWLockExclusive(&g_lock);
     entry = find_chain(self);
     if (entry) {
+        entered = real && !entry->guard.was_fullscreen;
         d = fs_guard_step(&entry->guard, real != FALSE, active, now);
     } else {
         d.report_fullscreen = real != FALSE;
@@ -186,6 +170,9 @@ static HRESULT STDMETHODCALLTYPE hook_get_fullscreen_state(IDXGISwapChain *self,
     }
     ReleaseSRWLockExclusive(&g_lock);
 
+    if (entered) {
+        log_fullscreen_mode(self);
+    }
     switch (d.event) {
     case FS_EV_LOST:
         LOGI("display: Windows took the game out of fullscreen on focus loss; "
@@ -224,12 +211,12 @@ static HRESULT STDMETHODCALLTYPE hook_get_fullscreen_state(IDXGISwapChain *self,
 
 static void track_chain(IDXGISwapChain *chain)
 {
-    void **slot = (void **)&chain->lpVtbl->GetFullscreenState;
     chain_entry *entry;
     int hooked;
 
     AcquireSRWLockExclusive(&g_lock);
-    hooked = hook_slot(g_chain_vtables, chain->lpVtbl, slot, (void *)hook_get_fullscreen_state);
+    hooked = vt_hook_slot(g_chain_vtables, VT_OF(chain), SLOT_CHAIN_GET_FULLSCREEN_STATE,
+                          (void *)hook_get_fullscreen_state);
     if (hooked) {
         /* A released swap chain's address may be reused by its successor. */
         entry = find_chain(chain);
@@ -255,7 +242,7 @@ static HRESULT STDMETHODCALLTYPE hook_create_swap_chain(IDXGIFactory *self, IUnk
     int ours;
 
     AcquireSRWLockShared(&g_lock);
-    original = (create_swap_chain_fn)find_original(g_factory_vtables, self->lpVtbl);
+    original = (create_swap_chain_fn)vt_original(g_factory_vtables, self->lpVtbl);
     ours = is_engine_factory(self);
     ReleaseSRWLockShared(&g_lock);
     if (!original) {
@@ -270,12 +257,12 @@ static HRESULT STDMETHODCALLTYPE hook_create_swap_chain(IDXGIFactory *self, IUnk
 
 static void track_factory(IDXGIFactory *factory)
 {
-    void **slot = (void **)&factory->lpVtbl->CreateSwapChain;
     unsigned i;
     int hooked;
 
     AcquireSRWLockExclusive(&g_lock);
-    hooked = hook_slot(g_factory_vtables, factory->lpVtbl, slot, (void *)hook_create_swap_chain);
+    hooked = vt_hook_slot(g_factory_vtables, VT_OF(factory), SLOT_FACTORY_CREATE_SWAP_CHAIN,
+                          (void *)hook_create_swap_chain);
     if (hooked && !is_engine_factory(factory)) {
         for (i = 0; i < MAX_FACTORIES; ++i) {
             if (!g_factories[i]) {
