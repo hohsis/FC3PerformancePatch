@@ -27,6 +27,7 @@ void config_defaults(fc3pp_config *cfg)
     cfg->high_dpi_aware = 1;
     cfg->disable_window_ghosting = 1;
     cfg->keep_xaudio2_loaded = 1;
+    cfg->texture_guard = 1;
 }
 
 const char *config_mode_name(cpu_mode mode)
@@ -106,6 +107,8 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
     cfg->high_dpi_aware = ini_get_bool(&doc, "Display", "HighDpiAware", cfg->high_dpi_aware);
     cfg->disable_window_ghosting =
         ini_get_bool(&doc, "Display", "DisableWindowGhosting", cfg->disable_window_ghosting);
+
+    cfg->texture_guard = ini_get_bool(&doc, "Textures", "SkipMismatchedMip0", cfg->texture_guard);
 
     cfg->keep_xaudio2_loaded = ini_get_bool(&doc, "Audio", "KeepXAudio2Loaded", cfg->keep_xaudio2_loaded);
 

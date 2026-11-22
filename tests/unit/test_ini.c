@@ -168,6 +168,7 @@ static void test_config_defaults(void)
     CHECK(c.high_dpi_aware == 1);
     CHECK(c.disable_window_ghosting == 1);
     CHECK(c.keep_xaudio2_loaded == 1);
+    CHECK(c.texture_guard == 1);
     CHECK(c.trace_audio == 0); /* diagnostics default to off */
 }
 
@@ -177,7 +178,8 @@ static void test_config_values(void)
                                "Cores=0,2,4-6\nFixCoreEnumeration=0\n[Timing]\nTimerResolutionMs=-3\n"
                                "[Memory]\nApplyLargeAddressAware=off\n[Debug]\nSimulateAffinityMask=0xFFFFFFFF\n"
                                "[Display]\nRestoreFullscreenOnFocus=0\nHighDpiAware=no\nDisableWindowGhosting=off\n"
-                               "[Audio]\nKeepXAudio2Loaded=0\n[Debug]\nTraceAudio=1\n";
+                               "[Audio]\nKeepXAudio2Loaded=0\n[Debug]\nTraceAudio=1\n"
+                               "[Textures]\nSkipMismatchedMip0=0\n";
     fc3pp_config c;
     CHECK(config_load_text(&c, text, sizeof(text) - 1) == 0);
     CHECK(c.enabled == 0);
@@ -195,6 +197,7 @@ static void test_config_values(void)
     CHECK(c.high_dpi_aware == 0);
     CHECK(c.disable_window_ghosting == 0);
     CHECK(c.keep_xaudio2_loaded == 0);
+    CHECK(c.texture_guard == 0);
     CHECK(c.trace_audio == 1);
 }
 

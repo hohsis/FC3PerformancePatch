@@ -28,6 +28,8 @@
 #include "patches.h"
 #include "pe_file.h"
 #include "pe_image.h"
+#include "tex_rule.h"
+#include "texguard.h"
 
 static int g_failures;
 static int g_checks;
@@ -255,6 +257,94 @@ static int hook_fakes(HMODULE mod)
     return n;
 }
 
+/* ---- the texture guard on the game's real texture class ----------------------------
+ * The guard is installed in the mapped module, then the game's own virtual
+ * table is used to hand a made-up texture object a top mip level that does not
+ * fit. The real method behind the slot would go on to use engine globals that
+ * do not exist in this process (and crash, which crash_reporter turns into a
+ * failure), so "returned 0 and nothing happened" proves the guard sits in
+ * front of it with the right calling convention. */
+
+typedef struct fake_d3d_texture {
+    void *const *vtbl;
+    UINT width, height, levels, format;
+    LONG desc_calls;
+} fake_d3d_texture;
+
+typedef struct fake_desc { /* D3D11_TEXTURE2D_DESC */
+    UINT width, height, levels, array_size, format, sample_count, sample_quality, usage, bind, cpu, misc;
+} fake_desc;
+
+static void __stdcall fake_get_desc(fake_d3d_texture *self, fake_desc *desc)
+{
+    memset(desc, 0, sizeof(*desc));
+    desc->width = self->width;
+    desc->height = self->height;
+    desc->levels = self->levels;
+    desc->array_size = 1;
+    desc->format = self->format;
+    desc->sample_count = 1;
+    InterlockedIncrement(&self->desc_calls);
+}
+
+static void *const FAKE_D3D_VTBL[11] = {
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, (void *)fake_get_desc,
+};
+
+typedef unsigned char(__fastcall *tex_add_fn)(void *self, void *unused, const void *dds, unsigned size, void *buffer,
+                                              unsigned flag);
+typedef unsigned char(__fastcall *tex_drop_fn)(void *self, void *unused);
+
+static void test_texture_guard(HMODULE mod, void **table, unsigned add_slot)
+{
+    static unsigned char dds[128];
+    fake_d3d_texture d3d;
+    void *object[16]; /* the engine's texture object: table at +0, Direct3D texture at +1Ch */
+    void *add_before = table[add_slot], *drop_before = table[add_slot + 1], *destroy_before = table[0];
+    unsigned width = 1024, height = 1024;
+    volatile unsigned canary = 0xC0FFEE11u;
+    unsigned char r;
+
+    CHECK(texguard_install(mod, "engine") == 1, "the texture guard did not install on the real module");
+    CHECK(table[add_slot] != add_before && table[add_slot + 1] != drop_before && table[0] != destroy_before,
+          "the texture class table was not changed");
+    if (table[add_slot] == add_before) {
+        return;
+    }
+    CHECK(texguard_install(mod, "engine") == 1, "installing twice is not harmless");
+
+    memset(&d3d, 0, sizeof(d3d));
+    d3d.vtbl = FAKE_D3D_VTBL;
+    d3d.width = 2048; /* what a texture mod puts in place of a 512 texture */
+    d3d.height = 2048;
+    d3d.levels = 11;
+    d3d.format = 70; /* BC1 */
+    memset(object, 0, sizeof(object));
+    object[0] = table;
+    object[TEX_OFFSET_D3D_TEXTURE / sizeof(void *)] = &d3d;
+
+    memset(dds, 0, sizeof(dds)); /* the game's original 1024x1024 DXT1 top level */
+    memcpy(dds, "DDS ", 4);
+    dds[4] = 124;
+    memcpy(dds + 12, &height, 4);
+    memcpy(dds + 16, &width, 4);
+    dds[28] = 1;
+    dds[76] = 32;
+    dds[80] = 4;
+    memcpy(dds + 84, "DXT1", 4);
+
+    r = ((tex_add_fn)table[add_slot])(object, NULL, dds, sizeof(dds), NULL, 0);
+    CHECK(r == 0, "a top level that is too small was not refused");
+    CHECK(d3d.desc_calls == 1, "the texture was asked for its description %ld times, expected once",
+          (long)d3d.desc_calls);
+    r = ((tex_drop_fn)table[add_slot + 1])(object, NULL);
+    CHECK(r == 0, "the unload that follows a refused level was not ignored");
+    CHECK(d3d.desc_calls == 1, "the unload that follows a refused level reached the game's method");
+    CHECK(canary == 0xC0FFEE11u, "the stack was disturbed by the calls");
+    printf("    texture guard: installed on the game's table; a 1024x1024 top level for a 2048x2048 texture is "
+           "refused before the game's code runs, and the unload that follows is ignored\n");
+}
+
 static void test_engine_module(const wchar_t *dir, const wchar_t *name)
 {
     wchar_t path[MAX_PATH];
@@ -370,6 +460,69 @@ static void test_engine_module(const wchar_t *dir, const wchar_t *name)
         int present = pei_find_import(mod, "dxgi.dll", "CreateDXGIFactory1") != NULL;
         CHECK(present, "the DX11 engine module does not import dxgi.dll!CreateDXGIFactory1");
         printf("    DXGI factory import: %s\n", present ? "found (fullscreen guard can attach)" : "MISSING");
+    }
+    {
+        /* The texture guard wraps two methods of the DX11 renderer's texture
+         * class, found by signature and through the class's virtual table. */
+        tex_class_site site;
+        unsigned long slot = 0;
+        unsigned slots = 0;
+        int found = 0;
+        int dx11 = _wcsicmp(name, L"FC3_d3d11.dll") == 0;
+
+        memset(&site, 0, sizeof(site));
+        for (i = 0; i < nsec && i < 32 && found == 0; ++i) {
+            if ((sec[i].characteristics & IMAGE_SCN_MEM_EXECUTE) && sec[i].size) {
+                found = tex_find_methods(sec[i].start, sec[i].size, (unsigned long)(ULONG_PTR)sec[i].start, &site);
+            }
+        }
+        for (i = 0; i < nsec && i < 32 && found == 1; ++i) {
+            if (sec[i].size && (sec[i].characteristics & IMAGE_SCN_MEM_READ) &&
+                !(sec[i].characteristics & (IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_DISCARDABLE))) {
+                unsigned long first = 0;
+                unsigned n = tex_find_slots(sec[i].start, sec[i].size, (unsigned long)(ULONG_PTR)sec[i].start, &site,
+                                            &first);
+                if (n && !slots) {
+                    slot = first;
+                }
+                slots += n;
+            }
+        }
+        if (dx11) {
+            CHECK(found == 1, "texture class methods: %s",
+                  found == 0 ? "not found" : "more than one candidate");
+            CHECK(found != 1 || slots == 1, "texture class: %u virtual tables hold the two methods, expected 1", slots);
+            if (found == 1 && slots == 1) {
+                void **table = (void **)(ULONG_PTR)slot - site.add_slot;
+                const unsigned char *destroy = (const unsigned char *)table[TEX_SLOT_DESTROY];
+                const unsigned char *base = (const unsigned char *)mod;
+                int in_code = 0;
+                for (i = 0; i < nsec && i < 32; ++i) {
+                    if ((sec[i].characteristics & IMAGE_SCN_MEM_EXECUTE) && destroy >= sec[i].start &&
+                        destroy + 32 <= sec[i].start + sec[i].size) {
+                        in_code = 1;
+                    }
+                }
+                CHECK(table[site.add_slot] == (void *)(ULONG_PTR)site.add &&
+                          table[site.add_slot + 1] == (void *)(ULONG_PTR)site.drop,
+                      "texture class: the two methods are not in the expected slots");
+                CHECK(in_code && tex_is_destructor(destroy, 32),
+                      "texture class: the table does not start with a destructor %u slots before the add method",
+                      site.add_slot);
+                printf("    texture class: '%s' variant, add at RVA 0x%08lX (slot %u), drop at RVA 0x%08lX, "
+                       "table at RVA 0x%08lX, destructor %s\n",
+                       site.variant, site.add - (unsigned long)(ULONG_PTR)mod, site.add_slot,
+                       site.drop - (unsigned long)(ULONG_PTR)mod,
+                       (unsigned long)((const unsigned char *)table - base),
+                       in_code && tex_is_destructor(destroy, 32) ? "confirmed" : "NOT RECOGNISED");
+            }
+        } else if (_wcsicmp(name, L"FC3.dll") == 0) {
+            CHECK(found == 0, "the DX9 engine module unexpectedly matches the DX11 texture class signatures");
+            printf("    texture class: not present (DX9 renderer; the texture guard is DX11 only)\n");
+        }
+        if (dx11 && found == 1 && slots == 1) {
+            test_texture_guard(mod, (void **)(ULONG_PTR)slot - site.add_slot, site.add_slot);
+        }
     }
     FreeLibrary(mod);
 }

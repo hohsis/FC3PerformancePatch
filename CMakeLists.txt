@@ -53,13 +53,15 @@ endif()
 
 # ---- pure logic (no OS calls): unit-testable ------------------------------
 add_library(fc3pp_core STATIC
-    src/ini.c src/config.c src/sigscan.c src/pe_file.c src/cpu_topology.c src/patches.c src/fs_guard.c)
+    src/ini.c src/config.c src/sigscan.c src/pe_file.c src/cpu_topology.c src/patches.c src/fs_guard.c
+    src/tex_rule.c)
 target_include_directories(fc3pp_core PUBLIC src)
 target_link_libraries(fc3pp_core PUBLIC fc3pp_options)
 
 # ---- Win32 layer -----------------------------------------------------------
 add_library(fc3pp_win STATIC
-    src/pe_image.c src/log.c src/cpu_shim.c src/laa.c src/vtable.c src/display.c src/audio.c)
+    src/pe_image.c src/log.c src/cpu_shim.c src/laa.c src/vtable.c src/display.c src/audio.c
+    src/texguard.c)
 target_link_libraries(fc3pp_win PUBLIC fc3pp_core user32)
 
 # ---- the proxy DLL -----------------------------------------------------------

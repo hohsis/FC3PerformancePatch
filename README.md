@@ -17,6 +17,7 @@ optionally, one flag in the game executable. No game files are included or redis
 | **2 GB memory limit** | The executables are not Large Address Aware, so the game can use only 2 GB of address space. | Enables the Large Address Aware flag (4 GB), keeping a backup of the original file. |
 | **Timer resolution** | The engine calls `Sleep(1)` hundreds of times per second and relies on someone else having requested a fine system timer. | Requests 1 ms timer resolution itself (a safety net; see *What has been tested*). |
 | **Fullscreen lost after Alt+Tab** (DX11) | Switch away from the fullscreen game and it comes back as a window, and stays one: the engine mistakes Windows dropping fullscreen on focus loss for you pressing Alt+Enter, and even overwrites its own Fullscreen setting. | Hides that drop from the engine and asks for fullscreen again when the game window is active. Alt+Enter and the in-game option still work. |
+| **Texture mods crash the game** (DX11) | The game keeps the largest version of most textures in a separate "mip0" file and assumes it is exactly twice the size of the base texture. Texture mods that replace one without the other break that assumption, and the game crashes in the graphics driver while loading. Such mods therefore tell you to set `DisableMip0Loading="1"`, which lowers the detail of every texture the mod did *not* replace. | Checks each mip0 file against its texture before the engine uses it and leaves out the ones that do not fit. The mod's textures load, everything else keeps full detail, and the special `GamerProfile.xml` is no longer needed. |
 | **Sound engine crash** | The game's sound runs on XAudio2 2.7, which has a known defect: in some situations `XAudio2_7.dll` is unloaded while it is still in use. Players report crashes naming `XAudio2_7.dll_unloaded`. | Keeps the DLL loaded until the game exits. The sound itself is not changed. |
 | **Display scaling** | The executables are not marked DPI aware. On a display scaled above 100 % Windows reports a smaller desktop to the game and blurs windowed and borderless output. | Marks the process DPI aware, and stops Windows replacing the window with a "Not responding" ghost during long loads. |
 
@@ -138,6 +139,7 @@ Everything is in `FC3PerformancePatch.ini` (each setting is explained in the fil
 | `[Display] RestoreFullscreenOnFocus` | `1` | DX11: return to fullscreen after Alt+Tab instead of staying windowed. |
 | `[Display] HighDpiAware` | `1` | Mark the game DPI aware (same as the Windows compatibility setting *High DPI scaling override: Application*). |
 | `[Display] DisableWindowGhosting` | `1` | No "Not responding" ghost window while the game loads. |
+| `[Textures] SkipMismatchedMip0` | `1` | DX11: leave out a texture's separate top level ("mip0") when it does not fit the texture, instead of crashing. Makes texture mods work with `DisableMip0Loading="0"`. |
 | `[Audio] KeepXAudio2Loaded` | `1` | Keep `XAudio2_7.dll` loaded for the whole session (see above). |
 | `[Debug] TraceAudio` | `0` | Log the sound device format, the mixer set-up and the sample rates of the sounds played. |
 | `[General] LogLevel` | `2` | `0` none, `1` errors, `2` normal, `3` debug. |
@@ -183,6 +185,11 @@ Honest status, so you know what to expect:
   against a stand-in for DXGI, and the log of a 33-minute Far Cry 3 session (DX11, Windows 11, 4K) shows
   Windows taking the game out of fullscreen three times, the first time seconds after start-up, with
   fullscreen restored each time.
+- Texture mods: the crash was reproduced with a large HD texture mod and traced, from the crash dump, to
+  the DX11 renderer filling a 4096x4096 texture level from a 1024x1024 file. A survey of the game's
+  archives shows all 2,259 texture pairs of the original game obeying the "twice the size, same format"
+  rule and 400 of that mod's 608 pairs breaking it. The fix is tested on the real engine DLLs of both
+  games: the mismatched level is refused before any game code runs.
 - The DLL, its installers and its tests pass under Wine 11 (Proton Experimental) on Linux and in CI
   (MSVC on Windows; MinGW-w64 cross build on Linux, tests under Wine).
 
@@ -200,6 +207,12 @@ Honest status, so you know what to expect:
   the DX9 executables, whose behaviour was not analysed. If it misbehaves, set
   `RestoreFullscreenOnFocus=0`; `Borderless="1"` in `GamerProfile.xml` is an alternative that avoids
   exclusive fullscreen altogether.
+- **Texture mods** (`SkipMismatchedMip0`, new in 1.1.0): tested against the real engine DLLs outside the
+  game, **not yet confirmed by playing with a texture mod installed**. It is DX11 only; the DX9 renderer
+  was not analysed, so keep `DisableMip0Loading="1"` there. A texture whose mip0 file is left out shows
+  the mod's base texture, exactly as it does with the mod's own settings. Large texture mods also need
+  more memory than the original game, and this is a 32-bit game: use the DX11 executable and keep Large
+  Address Aware enabled.
 - `KeepXAudio2Loaded` applies the published remedy for the XAudio2 2.7 unload defect, which is described
   as normally striking at exit. The crashes players report 10 to 15 minutes into a session name the same
   unloaded DLL, but that crash was not reproduced here, so whether this cures it is unconfirmed.
@@ -245,9 +258,9 @@ Builds are reproducible and contain no local paths.
 
 | Suite | What it covers |
 |---|---|
-| `unit` | INI parser, signature scanner, PE/LAA/checksum code, core-selection policy, the loop patch (executed on replicas of all four compiler variants), import hooking, the fullscreen-guard state machine |
-| `runtime` | The DLL loaded into a 32-bit host that mimics the game's module chain: export forwarding, processor layer, late-loaded and re-loaded modules, LAA self-patching, the fullscreen guard against a fake `dxgi.dll`, pass-through modes, log privacy. Runs natively and under Wine. |
-| `real_game_binaries` | The fix applied to your own game files in memory and executed (skipped without a game: set `FC3PP_GAME_BIN` to one or more `bin` folders separated by `;`) |
+| `unit` | INI parser, signature scanner, PE/LAA/checksum code, core-selection policy, the loop patch (executed on replicas of all four compiler variants), import hooking, the fullscreen-guard state machine, the texture rule and its bookkeeping |
+| `runtime` | The DLL loaded into a 32-bit host that mimics the game's module chain: export forwarding, processor layer, late-loaded and re-loaded modules, LAA self-patching, the fullscreen guard against a fake `dxgi.dll`, the texture guard against a stand-in texture class, pass-through modes, log privacy. Runs natively and under Wine. |
+| `real_game_binaries` | The start-up fix applied to your own game files in memory and executed; the texture guard installed on the game's real texture class and called through the game's own table (skipped without a game: set `FC3PP_GAME_BIN` to one or more `bin` folders separated by `;`) |
 | `export_table` | The DLL exports exactly what the Windows `version.dll` exports; only universally available imports |
 | `installer_windows` / `installer_linux` | Install, re-install and uninstall round trips in a fake Steam library, byte-for-byte restore |
 | `opsec_*` | No personal data (paths, user names, e-mail addresses, Steam IDs) in sources, history or binaries |

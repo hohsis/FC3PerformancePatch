@@ -12,6 +12,12 @@ default to on. Copy the new INI too if you want them listed.
   as a window that stayed windowed, because the engine mistakes Windows dropping fullscreen on focus
   loss for Alt+Enter. The patch now restores fullscreen when the game window is active again.
   Alt+Enter and the in-game option work as before. `[Display] RestoreFullscreenOnFocus=0` turns it off.
+- **Texture mods no longer need mip0 loading switched off (DX11).** The game crashes in the graphics
+  driver when a texture's separate top level ("mip0" file) is not exactly twice the size of the base
+  texture, which is what many HD texture mods produce; hence their instruction to set
+  `DisableMip0Loading="1"`, at the cost of detail on every texture they did not replace. The patch now
+  leaves out only the levels that do not fit (`[Textures] SkipMismatchedMip0`). Tested on the game's real
+  engine code outside the game; reports from play are welcome.
 - **DPI awareness.** The game is marked DPI aware, so on displays scaled above 100 % Windows no longer
   reports a smaller desktop to it or blurs windowed and borderless output (`[Display] HighDpiAware`).
 - Windows no longer swaps the game window for a "Not responding" ghost during long loads

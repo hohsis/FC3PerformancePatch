@@ -7,7 +7,7 @@ find_package(Python3 COMPONENTS Interpreter)
 add_executable(fc3pp_unit
     unit/main.c unit/dummy_pe.c
     unit/test_ini.c unit/test_sigscan.c unit/test_pe_file.c unit/test_cpu.c
-    unit/test_patches.c unit/test_pe_image.c unit/test_fs_guard.c)
+    unit/test_patches.c unit/test_pe_image.c unit/test_fs_guard.c unit/test_tex_rule.c)
 target_link_libraries(fc3pp_unit PRIVATE fc3pp_win)
 add_test(NAME unit COMMAND fc3pp_unit)
 
@@ -50,7 +50,7 @@ fc3pp_runtime_target(fx_engine_d3d11)
 
 add_library(fx_engine_dx9 SHARED runtime/fixture_engine.c)
 set_target_properties(fx_engine_dx9 PROPERTIES OUTPUT_NAME FC3)
-target_compile_definitions(fx_engine_dx9 PRIVATE FX_NO_LOOP FX_NO_DXGI)
+target_compile_definitions(fx_engine_dx9 PRIVATE FX_NO_LOOP FX_NO_DXGI FX_NO_TEXTURES)
 target_link_libraries(fx_engine_dx9 PRIVATE version)
 fc3pp_runtime_target(fx_engine_dx9)
 

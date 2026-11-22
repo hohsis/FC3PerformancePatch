@@ -39,6 +39,9 @@ typedef struct fc3pp_config {
     int high_dpi_aware;          /* mark the process DPI aware */
     int disable_window_ghosting; /* no "Not responding" ghost window while loading */
 
+    /* [Textures] */
+    int texture_guard; /* leave out top mip levels that do not fit their texture (DX11) */
+
     /* [Audio] */
     int keep_xaudio2_loaded; /* pin XAudio2_7.dll (documented premature-unload defect) */
 

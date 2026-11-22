@@ -331,6 +331,186 @@ FX_API int fx_audio_probe(void)
     return result;
 }
 
+/* ---- textures, streamed the way the DX11 renderer streams them ---------------------
+ * A texture object with the engine's layout (Direct3D texture at +1Ch) and a
+ * virtual table whose slots 9 and 10 are "add top mip level" and "drop top mip
+ * level". Both begin with the instructions of the real methods and then just
+ * keep count and resize the fake Direct3D texture, so the harness can see
+ * which calls got through. The DX9-named fixture has no such class. */
+#ifndef FX_NO_TEXTURES
+#include "../unit/tex_blobs.h"
+
+#if defined(_MSC_VER)
+#pragma section(".fxtex", execute, read)
+__declspec(allocate(".fxtex")) static const unsigned char fx_tex_add_code[] = {TEX_BLOB_ADD_RELEASE};
+__declspec(allocate(".fxtex")) static const unsigned char fx_tex_drop_code[] = {TEX_BLOB_DROP_RELEASE};
+__declspec(allocate(".fxtex")) static const unsigned char fx_tex_destroy_code[] = {TEX_BLOB_DESTROY};
+#else
+static const unsigned char fx_tex_destroy_code[] __attribute__((section(".fxtex,\"xr\"#"), used)) = {TEX_BLOB_DESTROY};
+static const unsigned char fx_tex_add_code[] __attribute__((section(".fxtex,\"xr\"#"), used)) = {TEX_BLOB_ADD_RELEASE};
+static const unsigned char fx_tex_drop_code[] __attribute__((section(".fxtex,\"xr\"#"), used)) = {
+    TEX_BLOB_DROP_RELEASE};
+#endif
+
+typedef struct fx_d3d_texture {
+    void *const *vtbl;
+    UINT width, height, levels, format;
+} fx_d3d_texture;
+
+typedef struct fx_texture {
+    void *const *vtbl;       /* +00h */
+    LONG adds;               /* +04h */
+    LONG drops;              /* +08h */
+    LONG destroyed;          /* +0Ch */
+    UINT last_size;          /* +10h */
+    UINT fail_next;          /* +14h */
+    UINT reserved;           /* +18h */
+    fx_d3d_texture *texture; /* +1Ch */
+    fx_d3d_texture storage;
+} fx_texture;
+
+typedef struct fx_texture_desc { /* D3D11_TEXTURE2D_DESC */
+    UINT width, height, levels, array_size, format, sample_count, sample_quality, usage, bind, cpu, misc;
+} fx_texture_desc;
+
+static void __stdcall fx_d3d_get_desc(fx_d3d_texture *self, fx_texture_desc *desc)
+{
+    memset(desc, 0, sizeof(*desc));
+    desc->width = self->width;
+    desc->height = self->height;
+    desc->levels = self->levels;
+    desc->array_size = 1;
+    desc->format = self->format;
+    desc->sample_count = 1;
+}
+
+static void *const g_fx_d3d_vtbl[11] = {
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, /* 0-9: never called */
+    (void *)fx_d3d_get_desc,                                    /* 10: GetDesc */
+};
+
+/* The methods are __thiscall; written as __fastcall with a spare register. */
+static void __fastcall fx_tex_unused_method(fx_texture *self, void *unused)
+{
+    (void)self;
+    (void)unused;
+}
+
+static void *const g_fx_tex_vtbl[12] = {
+    (void *)fx_tex_destroy_code,   /* 0  scalar deleting destructor */
+    (void *)fx_tex_unused_method,  /* 1 */
+    (void *)fx_tex_unused_method,  /* 2 */
+    (void *)fx_tex_unused_method,  /* 3 */
+    (void *)fx_tex_unused_method,  /* 4 */
+    (void *)fx_tex_unused_method,  /* 5 */
+    (void *)fx_tex_unused_method,  /* 6 */
+    (void *)fx_tex_unused_method,  /* 7 */
+    (void *)fx_tex_unused_method,  /* 8 */
+    (void *)fx_tex_add_code,       /* 9  AddTopLevel */
+    (void *)fx_tex_drop_code,      /* 10 DropTopLevel */
+    (void *)fx_tex_unused_method,  /* 11 */
+};
+
+typedef unsigned char(__fastcall *fx_add_fn)(fx_texture *, void *, const void *, unsigned, void *, unsigned);
+typedef unsigned char(__fastcall *fx_drop_fn)(fx_texture *, void *);
+typedef void *(__fastcall *fx_destroy_fn)(fx_texture *, void *, unsigned);
+
+static fx_texture g_fx_textures[8];
+#endif
+
+/* (Re)creates texture object number `index` in place, as the engine does when
+ * its allocator hands out the address of a destroyed object again. */
+FX_API void *fx_tex_create(unsigned index, unsigned width, unsigned height, unsigned levels, unsigned dxgi_format)
+{
+#ifndef FX_NO_TEXTURES
+    fx_texture *t;
+    if (index >= sizeof(g_fx_textures) / sizeof(g_fx_textures[0])) {
+        return NULL;
+    }
+    t = &g_fx_textures[index];
+    memset(t, 0, sizeof(*t));
+    t->vtbl = g_fx_tex_vtbl;
+    t->texture = &t->storage;
+    t->storage.vtbl = g_fx_d3d_vtbl;
+    t->storage.width = width;
+    t->storage.height = height;
+    t->storage.levels = levels;
+    t->storage.format = dxgi_format;
+    return t;
+#else
+    (void)index;
+    (void)width;
+    (void)height;
+    (void)levels;
+    (void)dxgi_format;
+    return NULL;
+#endif
+}
+
+/* The streaming job: a mip0 file was read, hand it to the texture. 1/0 as the
+ * method answered, -1 without a texture class. */
+FX_API int fx_tex_add(void *texture, const void *dds, unsigned size)
+{
+#ifndef FX_NO_TEXTURES
+    fx_texture *t = (fx_texture *)texture;
+    return ((fx_add_fn)t->vtbl[9])(t, NULL, dds, size, NULL, 0) ? 1 : 0;
+#else
+    (void)texture;
+    (void)dds;
+    (void)size;
+    return -1;
+#endif
+}
+
+FX_API int fx_tex_drop(void *texture)
+{
+#ifndef FX_NO_TEXTURES
+    fx_texture *t = (fx_texture *)texture;
+    return ((fx_drop_fn)t->vtbl[10])(t, NULL) ? 1 : 0;
+#else
+    (void)texture;
+    return -1;
+#endif
+}
+
+FX_API void fx_tex_destroy(void *texture)
+{
+#ifndef FX_NO_TEXTURES
+    fx_texture *t = (fx_texture *)texture;
+    ((fx_destroy_fn)t->vtbl[0])(t, NULL, 0);
+#else
+    (void)texture;
+#endif
+}
+
+FX_API void fx_tex_fail_next_add(void *texture, int fail)
+{
+#ifndef FX_NO_TEXTURES
+    ((fx_texture *)texture)->fail_next = fail ? 1u : 0u;
+#else
+    (void)texture;
+    (void)fail;
+#endif
+}
+
+/* out: calls that reached add, calls that reached drop, destructor calls,
+ * width, height, levels of the Direct3D texture. */
+FX_API void fx_tex_state(void *texture, unsigned out[6])
+{
+#ifndef FX_NO_TEXTURES
+    fx_texture *t = (fx_texture *)texture;
+    out[0] = (unsigned)t->adds;
+    out[1] = (unsigned)t->drops;
+    out[2] = (unsigned)t->destroyed;
+    out[3] = t->storage.width;
+    out[4] = t->storage.height;
+    out[5] = t->storage.levels;
+#else
+    (void)texture;
+    memset(out, 0, 6 * sizeof(out[0]));
+#endif
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
     (void)instance;

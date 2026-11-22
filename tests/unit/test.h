@@ -58,5 +58,6 @@ void suite_cpu(void);
 void suite_patches(void);
 void suite_pe_image(void);
 void suite_fs_guard(void);
+void suite_tex_rule(void);
 
 #endif /* FC3PP_TEST_H */

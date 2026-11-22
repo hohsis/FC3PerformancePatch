@@ -24,6 +24,7 @@
 #include "patches.h"
 #include "pe_image.h"
 #include "proxy.h"
+#include "texguard.h"
 
 #define MAX_TRACKED_MODULES 8
 #define MAX_INI_SIZE (1u << 20)
@@ -238,6 +239,9 @@ static void attach_module(HMODULE mod, const char *name, int is_engine)
             hooks += display_install_hooks(mod);
         }
         hooks += audio_install(mod, &g_cfg);
+        if (g_cfg.texture_guard) {
+            texguard_install(mod, name);
+        }
     }
     if (!seen || applied) {
         LOGI("%s: %u import hook%s installed", name, hooks, hooks == 1 ? "" : "s");
@@ -433,6 +437,7 @@ static void fc3pp_shutdown(int process_terminating)
         log_set_terminating();
         shim_log_stats();
         audio_log_stats();
+        texguard_log_stats();
         LOGI("process exit");
         return;
     }
@@ -442,6 +447,7 @@ static void fc3pp_shutdown(int process_terminating)
     }
     shim_log_stats();
     audio_log_stats();
+    texguard_log_stats();
     LOGI("unloaded");
     log_shutdown();
     proxy_shutdown();

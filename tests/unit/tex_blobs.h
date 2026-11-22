@@ -1,0 +1,139 @@
+/* Hand-assembled x86 stand-ins for the two texture methods the texture guard
+ * wraps. Each starts with the instruction sequence the guard recognises (the
+ * method asks the Direct3D texture at [this+1Ch] for its description) and
+ * then does something a test can observe instead of the engine's work.
+ *
+ * The object they operate on:
+ *
+ *     +00h  virtual table
+ *     +04h  number of calls that reached "add top level"
+ *     +08h  number of calls that reached "drop top level"
+ *     +0Ch  number of destructor calls        (maintained by the fixture)
+ *     +10h  size argument of the last add
+ *     +14h  non-zero: the next add fails, like the engine running out of memory
+ *     +1Ch  fake Direct3D texture: { table, width, height, mip levels, format }
+ *
+ * They contain no engine code beyond the recognised prologues and are
+ * position independent.
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+#ifndef FC3PP_TEX_BLOBS_H
+#define FC3PP_TEX_BLOBS_H
+
+/* bool __thiscall AddTopLevel(const void *dds, unsigned size, void *buffer, bool flag)
+ * as the optimised ("release") build of FC3_d3d11.dll begins it. */
+#define TEX_BLOB_ADD_RELEASE                                                                                \
+    0x55,                                           /* 00 push ebp                         */               \
+    0x8B, 0xEC,                                     /* 01 mov  ebp, esp                    */               \
+    0x83, 0xE4, 0xF0,                               /* 03 and  esp, -16                    */               \
+    0x81, 0xEC, 0x34, 0x02, 0x00, 0x00,             /* 06 sub  esp, 234h                   */               \
+    0x53,                                           /* 0C push ebx                         */               \
+    0x56,                                           /* 0D push esi                         */               \
+    0x8B, 0xD9,                                     /* 0E mov  ebx, ecx          ; this    */               \
+    0x8B, 0x43, 0x1C,                               /* 10 mov  eax, [ebx+1Ch]    ; texture */               \
+    0x8B, 0x08,                                     /* 13 mov  ecx, [eax]                  */               \
+    0x57,                                           /* 15 push edi                         */               \
+    0x8D, 0x94, 0x24, 0xA0, 0x00, 0x00, 0x00,       /* 16 lea  edx, [esp+0A0h]             */               \
+    0x52,                                           /* 1D push edx                         */               \
+    0x50,                                           /* 1E push eax                         */               \
+    0x8B, 0x41, 0x28,                               /* 1F mov  eax, [ecx+28h]              */               \
+    0xFF, 0xD0,                                     /* 22 call eax               ; GetDesc */               \
+    0x8B, 0x8C, 0x24, 0xA0, 0x00, 0x00, 0x00,       /* 24 mov  ecx, [esp+0A0h]             */               \
+    0x66, 0x0F, 0x6F, 0x84, 0x24, 0xA0, 0x00, 0x00, 0x00, /* 2B movdqa xmm0, [esp+0A0h]    */               \
+    /* ---- end of the recognised part ---- */                                                              \
+    0xFF, 0x43, 0x04,                               /* 34 inc  dword [ebx+4]     ; calls   */               \
+    0x80, 0x7B, 0x14, 0x00,                         /* 37 cmp  byte [ebx+14h], 0           */               \
+    0x74, 0x04,                                     /* 3B je   ok                          */               \
+    0x32, 0xC0,                                     /* 3D xor  al, al            ; failed  */               \
+    0xEB, 0x14,                                     /* 3F jmp  out                         */               \
+    0x8B, 0x45, 0x0C,                               /* 41 mov  eax, [ebp+0Ch]    <ok: size */               \
+    0x89, 0x43, 0x10,                               /* 44 mov  [ebx+10h], eax              */               \
+    0x8B, 0x43, 0x1C,                               /* 47 mov  eax, [ebx+1Ch]              */               \
+    0xD1, 0x60, 0x04,                               /* 4A shl  dword [eax+4], 1  ; width   */               \
+    0xD1, 0x60, 0x08,                               /* 4D shl  dword [eax+8], 1  ; height  */               \
+    0xFF, 0x40, 0x0C,                               /* 50 inc  dword [eax+0Ch]   ; levels  */               \
+    0xB0, 0x01,                                     /* 53 mov  al, 1                       */               \
+    0x5F,                                           /* 55 pop  edi               <out      */               \
+    0x5E,                                           /* 56 pop  esi                         */               \
+    0x5B,                                           /* 57 pop  ebx                         */               \
+    0x8B, 0xE5,                                     /* 58 mov  esp, ebp                    */               \
+    0x5D,                                           /* 5A pop  ebp                         */               \
+    0xC2, 0x10, 0x00                                /* 5B ret  10h                         */
+
+#define TEX_BLOB_ADD_RELEASE_SIZE 0x5E
+
+/* bool __thiscall DropTopLevel(void), same build. Returns false without doing
+ * anything when the texture has a single level, like the original. */
+#define TEX_BLOB_DROP_RELEASE                                                                               \
+    0x55,                                           /* 00 push ebp                         */               \
+    0x8B, 0xEC,                                     /* 01 mov  ebp, esp                    */               \
+    0x83, 0xEC, 0x5C,                               /* 03 sub  esp, 5Ch                    */               \
+    0x53,                                           /* 06 push ebx                         */               \
+    0x57,                                           /* 07 push edi                         */               \
+    0x8B, 0xF9,                                     /* 08 mov  edi, ecx          ; this    */               \
+    0x8B, 0x47, 0x1C,                               /* 0A mov  eax, [edi+1Ch]    ; texture */               \
+    0x8B, 0x08,                                     /* 0D mov  ecx, [eax]                  */               \
+    0x8D, 0x55, 0xA4,                               /* 0F lea  edx, [ebp-5Ch]              */               \
+    0x52,                                           /* 12 push edx                         */               \
+    0x50,                                           /* 13 push eax                         */               \
+    0x8B, 0x41, 0x28,                               /* 14 mov  eax, [ecx+28h]              */               \
+    0xFF, 0xD0,                                     /* 17 call eax               ; GetDesc */               \
+    0xBB, 0x01, 0x00, 0x00, 0x00,                   /* 19 mov  ebx, 1                      */               \
+    0x39, 0x5D, 0xAC,                               /* 1E cmp  [ebp-54h], ebx    ; levels  */               \
+    0x75, 0x08,                                     /* 21 jne  more                        */               \
+    0x5F,                                           /* 23 pop  edi                         */               \
+    0x32, 0xC0,                                     /* 24 xor  al, al                      */               \
+    0x5B,                                           /* 26 pop  ebx                         */               \
+    0x8B, 0xE5,                                     /* 27 mov  esp, ebp                    */               \
+    0x5D,                                           /* 29 pop  ebp                         */               \
+    0xC3,                                           /* 2A ret                              */               \
+    0x8B, 0x45, 0xA4,                               /* 2B mov  eax, [ebp-5Ch]    <more     */               \
+    0x83, 0xF8, 0x08,                               /* 2E cmp  eax, 8                      */               \
+    /* ---- end of the recognised part ---- */                                                              \
+    0xFF, 0x47, 0x08,                               /* 31 inc  dword [edi+8]     ; calls   */               \
+    0x8B, 0x47, 0x1C,                               /* 34 mov  eax, [edi+1Ch]              */               \
+    0xD1, 0x68, 0x04,                               /* 37 shr  dword [eax+4], 1  ; width   */               \
+    0xD1, 0x68, 0x08,                               /* 3A shr  dword [eax+8], 1  ; height  */               \
+    0xFF, 0x48, 0x0C,                               /* 3D dec  dword [eax+0Ch]   ; levels  */               \
+    0xB0, 0x01,                                     /* 40 mov  al, 1                       */               \
+    0x5F,                                           /* 42 pop  edi                         */               \
+    0x5B,                                           /* 43 pop  ebx                         */               \
+    0x8B, 0xE5,                                     /* 44 mov  esp, ebp                    */               \
+    0x5D,                                           /* 46 pop  ebp                         */               \
+    0xC3                                            /* 47 ret                              */
+
+#define TEX_BLOB_DROP_RELEASE_SIZE 0x48
+
+/* void *__thiscall Destroy(unsigned flags): the scalar deleting destructor the
+ * class's table starts with. The "destructor" it calls counts at [this+0Ch]. */
+#define TEX_BLOB_DESTROY                                                                                    \
+    0x55,                                           /* 00 push ebp                         */               \
+    0x8B, 0xEC,                                     /* 01 mov  ebp, esp                    */               \
+    0x56,                                           /* 03 push esi                         */               \
+    0x8B, 0xF1,                                     /* 04 mov  esi, ecx          ; this    */               \
+    0xE8, 0x0D, 0x00, 0x00, 0x00,                   /* 06 call destructor                  */               \
+    0xF6, 0x45, 0x08, 0x01,                         /* 0B test byte [ebp+8], 1             */               \
+    0x74, 0x00,                                     /* 0F jz   +0     ; nothing to free    */               \
+    /* ---- end of the recognised part ---- */                                                              \
+    0x8B, 0xC6,                                     /* 11 mov  eax, esi                    */               \
+    0x5E,                                           /* 13 pop  esi                         */               \
+    0x5D,                                           /* 14 pop  ebp                         */               \
+    0xC2, 0x04, 0x00,                               /* 15 ret  4                           */               \
+    0xFF, 0x41, 0x0C,                               /* 18 inc  dword [ecx+0Ch]  <destructor */              \
+    0xC3                                            /* 1B ret                              */
+
+#define TEX_BLOB_DESTROY_SIZE 0x1C
+
+/* The first bytes of the same two methods in the size-optimised build
+ * (Blood Dragon). Only used to test recognition; never executed. */
+#define TEX_BLOB_ADD_SIZE_HEAD                                                                              \
+    0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x38, 0x02, 0x00, 0x00, 0x53, 0x56, 0x8B, 0xD9, 0x8B, 0x43, 0x1C, 0x8B, 0x08, \
+    0x57, 0x8D, 0x55, 0x88, 0x52, 0x50, 0x89, 0x5D, 0xFC, 0xFF, 0x51, 0x28, 0x8B, 0x45, 0x88, 0x6A, 0x0B, 0x03, \
+    0xC0, 0x59, 0x8D, 0x75, 0x88, 0x8D, 0x7D, 0xB4, 0xF3, 0xA5, 0xC3
+
+#define TEX_BLOB_DROP_SIZE_HEAD                                                                             \
+    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x5C, 0x53, 0x56, 0x57, 0x8B, 0xD9, 0x8B, 0x43, 0x1C, 0x8B, 0x08, 0x8D, 0x55, \
+    0xA4, 0x52, 0x50, 0xFF, 0x51, 0x28, 0x33, 0xD2, 0x42, 0x39, 0x55, 0xAC, 0x0F, 0x84, 0x6B, 0x01, 0x00, 0x00, \
+    0x8B, 0x45, 0xA4, 0x83, 0xF8, 0x08, 0xC3
+
+#endif /* FC3PP_TEX_BLOBS_H */

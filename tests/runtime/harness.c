@@ -33,6 +33,13 @@ __declspec(dllimport) int fx_dxgi_fullscreen(void);
 __declspec(dllimport) int fx_dxgi_set_fullscreen(int fullscreen);
 __declspec(dllimport) void *fx_dxgi_chain(void);
 __declspec(dllimport) int fx_audio_probe(void);
+__declspec(dllimport) void *fx_tex_create(unsigned index, unsigned width, unsigned height, unsigned levels,
+                                          unsigned dxgi_format);
+__declspec(dllimport) int fx_tex_add(void *texture, const void *dds, unsigned size);
+__declspec(dllimport) int fx_tex_drop(void *texture);
+__declspec(dllimport) void fx_tex_destroy(void *texture);
+__declspec(dllimport) void fx_tex_fail_next_add(void *texture, int fail);
+__declspec(dllimport) void fx_tex_state(void *texture, unsigned out[6]);
 
 static int g_checks;
 static int g_failures;
@@ -633,6 +640,133 @@ static void scenario_fullscreen(int guard_enabled)
     }
 }
 
+/* ---- texture guard -----------------------------------------------------------------
+ * The engine fixture has a texture class with the real layout; its "add top
+ * mip level" and "drop top mip level" methods count the calls that reach them
+ * and double / halve a fake Direct3D texture. */
+
+#define DXGI_BC1 70u
+#define DXGI_BC3 76u
+
+enum { TS_ADDS, TS_DROPS, TS_DESTROYED, TS_WIDTH, TS_HEIGHT, TS_LEVELS };
+
+/* The header of a block-compressed DDS image of the given size. */
+static const void *dds_image(unsigned width, unsigned height, const char *fourcc)
+{
+    static unsigned char h[128];
+    memset(h, 0, sizeof(h));
+    memcpy(h, "DDS ", 4);
+    h[4] = 124;
+    memcpy(h + 12, &height, 4);
+    memcpy(h + 16, &width, 4);
+    h[28] = 1;
+    h[76] = 32;
+    h[80] = 4;
+    memcpy(h + 84, fourcc, 4);
+    return h;
+}
+
+static void scenario_textures(int guard_enabled)
+{
+    unsigned s[6];
+    void *t;
+    int cycle;
+
+    /* 1. What the original game data looks like: a 512 texture, a 1024 top level. */
+    t = fx_tex_create(0, 512, 512, 10, DXGI_BC1);
+    CHECK(t != NULL, "the engine fixture has no texture class");
+    if (!t) {
+        return;
+    }
+    CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT1"), 128) == 1, "a fitting top level was refused");
+    fx_tex_state(t, s);
+    CHECK(s[TS_ADDS] == 1 && s[TS_WIDTH] == 1024 && s[TS_LEVELS] == 11, "fitting top level: texture is %ux%u, %u levels",
+          s[TS_WIDTH], s[TS_HEIGHT], s[TS_LEVELS]);
+    CHECK(fx_tex_drop(t) == 1, "dropping a real top level failed");
+    fx_tex_state(t, s);
+    CHECK(s[TS_DROPS] == 1 && s[TS_WIDTH] == 512 && s[TS_LEVELS] == 10, "after the drop: texture is %ux%u, %u levels",
+          s[TS_WIDTH], s[TS_HEIGHT], s[TS_LEVELS]);
+
+    /* 2. A texture mod: the base was replaced by a 2048 texture, the top level
+     *    file is still the game's 1024 one. Unguarded, the engine builds a 4096
+     *    texture and has Direct3D read 16 times the data that was loaded. */
+    t = fx_tex_create(1, 2048, 2048, 11, DXGI_BC1);
+    if (!guard_enabled) {
+        CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT1"), 128) == 1, "SkipMismatchedMip0=0: the call was held back");
+        fx_tex_state(t, s);
+        CHECK(s[TS_ADDS] == 1 && s[TS_WIDTH] == 4096, "SkipMismatchedMip0=0: the engine method was not reached");
+        CHECK(fx_tex_drop(t) == 1, "SkipMismatchedMip0=0: the drop was held back");
+        fx_tex_state(t, s);
+        CHECK(s[TS_DROPS] == 1 && s[TS_WIDTH] == 2048, "SkipMismatchedMip0=0: the drop method was not reached");
+        return;
+    }
+    for (cycle = 0; cycle < 3; ++cycle) {
+        CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT1"), 128) == 0, "a top level that is too small was accepted");
+        fx_tex_state(t, s);
+        CHECK(s[TS_ADDS] == 0, "a top level that is too small reached the engine (cycle %d)", cycle);
+        CHECK(s[TS_WIDTH] == 2048 && s[TS_LEVELS] == 11, "the texture changed although nothing was added");
+        /* The resource layer does not know and unloads "the level" later. */
+        fx_tex_drop(t);
+        fx_tex_state(t, s);
+        CHECK(s[TS_DROPS] == 0, "the unload after a refused level reached the engine (cycle %d)", cycle);
+        CHECK(s[TS_WIDTH] == 2048 && s[TS_LEVELS] == 11,
+              "the texture lost a real level after a refused one (cycle %d): %ux%u", cycle, s[TS_WIDTH], s[TS_HEIGHT]);
+    }
+    /* Only one unload is swallowed per refused level. */
+    CHECK(fx_tex_drop(t) == 1, "a real unload was swallowed");
+    fx_tex_state(t, s);
+    CHECK(s[TS_DROPS] == 1 && s[TS_WIDTH] == 1024, "a real unload did not reach the engine");
+
+    /* 3. Right size, wrong pixel format: half the bytes per block. */
+    t = fx_tex_create(2, 512, 512, 10, DXGI_BC3);
+    CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT1"), 128) == 0, "a top level in another format was accepted");
+    fx_tex_state(t, s);
+    CHECK(s[TS_ADDS] == 0 && s[TS_WIDTH] == 512, "a top level in another format reached the engine");
+    CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT5"), 128) == 1, "the matching format was refused");
+    fx_tex_drop(t); /* the one for the refused level */
+    fx_tex_state(t, s);
+    CHECK(s[TS_ADDS] == 1 && s[TS_DROPS] == 0 && s[TS_WIDTH] == 1024, "format case: wrong call went through");
+    fx_tex_drop(t);
+    fx_tex_state(t, s);
+    CHECK(s[TS_DROPS] == 1 && s[TS_WIDTH] == 512, "format case: the real unload did not go through");
+
+    /* 4. A shrunken base with the original top level. */
+    t = fx_tex_create(3, 256, 256, 9, DXGI_BC1);
+    CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT1"), 128) == 0, "a top level that is too large was accepted");
+    fx_tex_state(t, s);
+    CHECK(s[TS_ADDS] == 0, "a top level that is too large reached the engine");
+
+    /* 5. The engine's own method fails (out of memory): same imbalance, same cure. */
+    t = fx_tex_create(4, 512, 512, 10, DXGI_BC1);
+    fx_tex_fail_next_add(t, 1);
+    CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT1"), 128) == 0, "the engine's failure was not passed on");
+    fx_tex_state(t, s);
+    CHECK(s[TS_ADDS] == 1 && s[TS_WIDTH] == 512, "the engine method was not asked");
+    fx_tex_drop(t);
+    fx_tex_state(t, s);
+    CHECK(s[TS_DROPS] == 0 && s[TS_WIDTH] == 512, "the unload after a failed add reached the engine");
+
+    /* 6. A refused texture is destroyed and another one is created at the same
+     *    address: its first unload is a real one. */
+    t = fx_tex_create(5, 2048, 2048, 11, DXGI_BC1);
+    CHECK(fx_tex_add(t, dds_image(1024, 1024, "DXT1"), 128) == 0, "refusal before destruction");
+    fx_tex_destroy(t);
+    fx_tex_state(t, s);
+    CHECK(s[TS_DESTROYED] == 1, "the destructor was not reached");
+    t = fx_tex_create(5, 1024, 1024, 11, DXGI_BC1);
+    CHECK(fx_tex_drop(t) == 1, "a new texture at a reused address had its unload swallowed");
+    fx_tex_state(t, s);
+    CHECK(s[TS_DROPS] == 1 && s[TS_WIDTH] == 512, "reused address: the unload did not reach the engine");
+
+    /* 7. Data that is not a DDS image is the engine's to reject. */
+    t = fx_tex_create(6, 512, 512, 10, DXGI_BC1);
+    fx_tex_add(t, "not a DDS image, but long enough to look at .........................................."
+                  "...............................................................................",
+               128);
+    fx_tex_state(t, s);
+    CHECK(s[TS_ADDS] == 1, "unreadable data was not left to the engine");
+}
+
 int main(int argc, char **argv)
 {
     const char *scenario = argc > 1 ? argv[1] : "engine";
@@ -673,6 +807,10 @@ int main(int argc, char **argv)
             CHECK(GetModuleHandleA("XAudio2_7.dll") != NULL,
                   "XAudio2_7.dll was unloaded although the patch is meant to keep it loaded");
         }
+    } else if (strcmp(scenario, "textures") == 0) {
+        scenario_textures(1);
+    } else if (strcmp(scenario, "textures-off") == 0) {
+        scenario_textures(0);
     } else if (strcmp(scenario, "forward-only") == 0) {
         /* nothing beyond the shared checks */
     } else {

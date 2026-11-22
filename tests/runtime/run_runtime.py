@@ -33,7 +33,7 @@ def ini(**kw):
     values = {
         "enabled": 1, "log": 3, "fix": 1, "mode": "engine", "max_cores": 3, "smt": 0,
         "timer": 1, "sleep_yield": 0, "laa": 0, "trace": 1, "simulate": "0",
-        "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0,
+        "restore_fs": 1, "dpi": 1, "ghosting": 1, "keep_xaudio": 1, "trace_audio": 0, "texguard": 1,
     }
     values.update(kw)
     return (
@@ -42,6 +42,7 @@ def ini(**kw):
         "[Timing]\nTimerResolutionMs={timer}\nSleepZeroYield={sleep_yield}\n"
         "[Memory]\nApplyLargeAddressAware={laa}\n"
         "[Display]\nRestoreFullscreenOnFocus={restore_fs}\nHighDpiAware={dpi}\nDisableWindowGhosting={ghosting}\n"
+        "[Textures]\nSkipMismatchedMip0={texguard}\n"
         "[Audio]\nKeepXAudio2Loaded={keep_xaudio}\n"
         "[Debug]\nTraceCpuApi={trace}\nTraceAudio={trace_audio}\nSimulateAffinityMask={simulate}\n"
     ).format(**values)
@@ -71,7 +72,22 @@ SCENARIOS = {
               ["FC3.dll: processor-enumeration loop signature not found", "relying on the affinity-mask hook"],
               ["ERROR"]),
     "dx9-engine": (HARNESS_DX9, ini(), ["forward-only"], True,
-                   ["FC3.dll:", "Mode=engine", "initialised"], ["ERROR"]),
+                   ["FC3.dll:", "Mode=engine", "initialised", "FC3.dll: texture guard not available"], ["ERROR"]),
+    "textures": (HARNESS, ini(), ["textures"], True,
+                 ["FC3_d3d11.dll: texture guard active ('release' build variant)",
+                  "textures: left out a top mip level that does not fit its texture: the texture is 2048x2048 BC1, "
+                  "so the level must be 4096x4096, but the file holds 1024x1024 BC1 (too small)",
+                  "the texture is 512x512 BC3, so the level must be 1024x1024, but the file holds 1024x1024 BC1 "
+                  "(different pixel format)",
+                  "the texture is 256x256 BC1, so the level must be 512x512, but the file holds 1024x1024 BC1 "
+                  "(too large)",
+                  "textures: the engine could not add a top mip level to a texture",
+                  "textures: 3 top mip levels added, 6 left out because they did not fit (4 too small, 1 too large, "
+                  "1 in a different pixel format), 1 not added by the engine itself; "
+                  "5 matching unload requests ignored"],
+                 ["ERROR"]),
+    "textures-off": (HARNESS, ini(texguard=0), ["textures-off"], True,
+                     ["initialised"], ["texture guard", "textures:", "ERROR"]),
     "fullscreen": (HARNESS, ini(), ["fullscreen"], True,
                    ["display: fullscreen guard attached to a swap chain of the game",
                     "display: Windows took the game out of fullscreen on focus loss",

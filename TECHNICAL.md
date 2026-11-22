@@ -366,7 +366,93 @@ Wine's implementation). Pinning has no effect other than keeping the DLL mapped 
 The crash was not reproduced in this analysis. The reports name the same unloaded DLL, but they describe
 a crash in mid-session rather than at exit, so the link to the known defect is plausible, not proven.
 
-## 9. Control Flow Guard
+## 9. Textures: top mip levels that do not fit (texture mods)
+
+### What the engine does
+
+Most textures are stored as two files: `name.xbt` holds every mip level except the largest, and
+`name_mip0.xbt` holds only the largest level. The base file's header names its mip0 file. The base is
+loaded with the scene; the mip0 file is streamed in when the texture gets close to the camera and dropped
+again later. (`DisableMip0Loading="1"` in `GamerProfile.xml` switches that streaming off for all textures.)
+
+In the DX11 renderer the texture class has two virtual methods for this, next to each other in its table.
+Decompiled from `FC3_d3d11.dll` (Far Cry 3, RVA 0x14F3FA0 and 0x14F3DC0):
+
+```
+bool Texture::AddTopLevel(const void *dds, unsigned size, ...)
+    desc = d3dTexture->GetDesc()
+    new  = CreateTexture2D(2 * desc.Width, 2 * desc.Height, desc.MipLevels + 1, desc.Format)
+    UpdateSubresource(new, level 0, pixels of the DDS image, row pitch of the DDS image)
+    for n in 0 .. desc.MipLevels - 1: CopySubresourceRegion(new, n + 1, old, n)
+    swap(new, old)
+
+bool Texture::DropTopLevel()
+    the reverse: a texture of half the size, every level copied down by one
+```
+
+`AddTopLevel` never compares the image it was given with the texture it is building. The size and format
+of the new texture come from the texture that is already loaded; only the pixel pointer and the row pitch
+come from the mip0 file. `UpdateSubresource` then copies as many rows and bytes as the *new texture* needs.
+
+### Why texture mods crash
+
+A crash with a large HD texture mod installed (and the game's default `DisableMip0Loading="0"`) was
+analysed from its dump: access violation in the graphics driver, reading, called from
+`FC3_d3d11.dll+0x14F42A9`, the instruction after the `UpdateSubresource` call above. The arguments on the
+stack: the loaded texture was 2048x2048 BC1 with 11 levels (the mod's replacement), the new texture
+4096x4096 with 12 levels, and the source a 1024x1024 DXT1 image of 0x80000 bytes with a row pitch of
+0x800: the original game's mip0 file. The driver was asked to read 8 MB from a buffer of 0.5 MB and
+faulted at the first unmapped page behind it.
+
+A survey of the archives confirms the pattern. In the original game every one of the 2,259 base textures
+that names a mip0 file is paired with one of exactly twice its width and height in the same format. In
+that mod, 608 replaced base textures name a mip0 file, and 400 of the pairs break the rule:
+
+| Pair | Count | Effect in the unpatched game |
+|---|---|---|
+| mip0 exactly twice the base, same format | 208 | works |
+| mip0 smaller than twice the base | 294 | read past the end of the file data: crash |
+| mip0 in a different block format (DXT1 against DXT5) | 80 | wrong picture, or overrun when the texture's blocks are larger |
+| mip0 larger than twice the base | 26 | wrong picture |
+
+That is why such mods instruct users to disable mip0 loading altogether. The cost of that workaround is
+that the textures the mod did not touch lose their largest level too, and so do the 208 pairs the mod got
+right.
+
+### The texture guard (`[Textures] SkipMismatchedMip0`)
+
+The guard wraps `AddTopLevel`, `DropTopLevel` and the class's destructor in the class's virtual table.
+Before the engine's `AddTopLevel` runs, it reads the texture's description and the DDS header and applies
+the rule the original data obeys: width and height exactly twice the texture's, same pixel format family.
+An image that fits goes to the engine unchanged. One that does not is refused: the method returns false,
+which is the engine's own failure path (the caller frees the file data either way), and the texture keeps
+what it has, which is what the mod's own recommended settings would show.
+
+Refusing is not enough on its own. The resource layer above the texture keeps its own count: after asking
+for a level to be added it doubles its recorded size, and when the texture is no longer needed up close it
+asks for a level to be dropped and halves it, whether or not the add succeeded. An object that never
+received its level would then drop a level it really has, and lose another one on every load/unload
+cycle. The guard therefore remembers each refused object and swallows the one `DropTopLevel` that belongs
+to it. The same imbalance exists in the unmodified game when `AddTopLevel` fails for its own reasons
+(`CreateTexture2D` failing when memory is short); the guard handles that case the same way.
+
+Locating the class: both methods are found by signature (their opening instructions, which ask the
+Direct3D texture at `[this+0x1C]` for its description), then the one data location where a pointer to
+`AddTopLevel` is directly followed by a pointer to `DropTopLevel` is the class's table. The table must
+begin, the expected number of slots earlier, with a function that looks like a compiler-generated deleting
+destructor; otherwise nothing is touched. Far Cry 3 has the pair in slots 9 and 10, Blood Dragon (a
+size-optimised build with one method less) in slots 8 and 9. Each signature matches exactly once in its
+engine module and not at all in the other three.
+
+Status: the cause is established from the crash dump and the decompiled code. The guard is tested on a
+stand-in class whose methods begin with the real instruction sequences, and on the real `FC3_d3d11.dll`
+of both games mapped into a test process: a 1024x1024 top level offered to a 2048x2048 texture through
+the game's own table is refused before any game code runs, and the following drop is swallowed. **It has
+not yet been confirmed by playing with a texture mod installed.** The DX9 renderer has its own texture
+class, which was not analysed; the guard does nothing there. Texture mods also raise memory use, which
+this guard does not address: the process has 4 GB of address space at most.
+
+## 10. Control Flow Guard
 
 None of the game binaries are built with CFG (`IMAGE_DLLCHARACTERISTICS_GUARD_CF` is clear in all of them).
 Disabling CFG per executable in Windows Exploit Protection is a frequently repeated community fix for long
@@ -375,13 +461,13 @@ installer offers it as an explicit option (`-DisableCFG`), records the previous 
 uninstall. It is never applied automatically, because it lowers a security mitigation system-wide for the
 named executable.
 
-## 10. Tests and their limits
+## 11. Tests and their limits
 
 | Layer | Method |
 |---|---|
 | Logic | Unit tests for every pure module; the four loop variants are executed as machine code before and after patching |
-| Real engine code | The game's own function, called in isolation from the user's DLLs (section 2) |
-| Process integration | A 32-bit host with stand-in modules named like the engine's, in 18 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
+| Real engine code | The game's own function, called in isolation from the user's DLLs (section 2); the texture guard installed on the game's real texture class table and called through it (section 9) |
+| Process integration | A 32-bit host with stand-in modules named like the engine's, in 20 scenarios, natively and under Wine: forwarding, processor layer against the real machine topology, late and re-loaded modules, self-applied LAA, the fullscreen guard against a stand-in `dxgi.dll`, the texture guard against a stand-in texture class, the audio module against the real XAudio2 2.7 where it is installed, pass-through and disabled modes |
 | Installers | Round trips in a fake Steam library on Windows and Linux; restore is compared byte for byte |
 | In game | Both games started (DX11; Far Cry 3 also DX9) with the default configuration; logs and API trace inspected |
 | Privacy | Sources, git history and binaries are scanned for paths, account names, addresses and IDs |
