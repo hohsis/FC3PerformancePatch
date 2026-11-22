@@ -115,6 +115,52 @@ unsigned cpu_topology_from_glpi(cpu_topology *t, const unsigned char *buf, size_
     return t->core_count - before;
 }
 
+unsigned cpu_topology_rank_by_capacity(cpu_topology *t, const unsigned long *capacity)
+{
+    unsigned long distinct[FC3PP_MAX_CPUS];
+    unsigned n = 0, i, j;
+    int first = -1;
+
+    if (!capacity) {
+        return 0;
+    }
+    for (i = 0; i < FC3PP_MAX_CPUS; ++i) {
+        if (!t->cpu[i].present) {
+            continue;
+        }
+        if (first < 0) {
+            first = (int)i;
+        }
+        if (t->cpu[i].eff_class != t->cpu[first].eff_class || capacity[i] == 0) {
+            return 0; /* the system already told us, or we do not know enough */
+        }
+        for (j = 0; j < n && distinct[j] != capacity[i]; ++j) {
+        }
+        if (j == n) {
+            distinct[n++] = capacity[i];
+        }
+    }
+    if (n < 2) {
+        return 0;
+    }
+    /* ascending: class 0 is the slowest, as with EfficiencyClass */
+    for (i = 1; i < n; ++i) {
+        unsigned long key = distinct[i];
+        for (j = i; j > 0 && distinct[j - 1] > key; --j) {
+            distinct[j] = distinct[j - 1];
+        }
+        distinct[j] = key;
+    }
+    for (i = 0; i < FC3PP_MAX_CPUS; ++i) {
+        if (t->cpu[i].present) {
+            for (j = 0; distinct[j] != capacity[i]; ++j) {
+            }
+            t->cpu[i].eff_class = (unsigned char)j;
+        }
+    }
+    return n;
+}
+
 typedef struct sel_core {
     unsigned char cpus[FC3PP_MAX_CPUS];
     unsigned char n;

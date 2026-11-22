@@ -362,6 +362,33 @@ static void scenario_virtualized(const real_machine *m, int max_cores, int proce
     }
     SetThreadAffinityMask(GetCurrentThread(), m->process_mask);
 
+    /* Something outside confines the process to other processors after
+     * start-up (Android launchers do that once the game's window is up). The
+     * engine's requests must keep succeeding with whatever is left. */
+    if (v >= 2) {
+        unsigned long before = real_process_affinity();
+        unsigned long lost, left;
+        fx_set_thread_affinity(1ul << 0);
+        lost = real_thread_affinity(m); /* the real processor behind virtual processor 0 */
+        fx_set_thread_affinity(vfull);
+        left = before & ~lost;
+        if (lost && left && SetProcessAffinityMask(GetCurrentProcess(), left)) {
+            unsigned long now;
+            CHECK(fx_set_thread_affinity(1ul << 0) != 0,
+                  "an affinity request for a processor the process has lost was failed");
+            now = (unsigned long)SetThreadAffinityMask(GetCurrentThread(), left);
+            CHECK(now != 0 && (now & lost) == 0, "the thread is on a processor the process has lost (0x%lX)", now);
+            CHECK(fx_set_thread_affinity(1ul << 1) != 0, "a request for a processor that is still there failed");
+            now = (unsigned long)SetThreadAffinityMask(GetCurrentThread(), left);
+            CHECK(popcount(now) == 1 && (now & left) == now,
+                  "a processor that is still there was not used exactly (0x%lX)", now);
+            CHECK(SetProcessAffinityMask(GetCurrentProcess(), before), "could not restore the process affinity");
+            SetThreadAffinityMask(GetCurrentThread(), before);
+            printf("  process confined to 0x%lX and back: engine affinity requests kept working\n", left);
+        }
+    }
+    SetThreadAffinityMask(GetCurrentThread(), m->process_mask);
+
     CHECK(fx_set_ideal(0) != (unsigned long)-1, "SetThreadIdealProcessor failed inside the engine");
     CHECK(fx_glpi_cores() == v, "GetLogicalProcessorInformation reports %u cores to the engine, expected %u",
           fx_glpi_cores(), v);

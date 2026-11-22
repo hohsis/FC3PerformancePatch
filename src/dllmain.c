@@ -71,6 +71,41 @@ static char *read_text_file(const wchar_t *path, size_t *len)
     return buf;
 }
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+static void cpuid(unsigned leaf, unsigned regs[4])
+{
+    int r[4];
+    __cpuid(r, (int)leaf);
+    memcpy(regs, r, sizeof(r));
+}
+#else
+#include <cpuid.h>
+static void cpuid(unsigned leaf, unsigned regs[4])
+{
+    __cpuid(leaf, regs[0], regs[1], regs[2], regs[3]);
+}
+#endif
+
+/* FEX (x86 on ARM64) sets the "hypervisor present" bit and answers the
+ * hypervisor identification leaf with "FEXIFEXIEMU". */
+static int running_under_fex(void)
+{
+    unsigned r[4];
+    char vendor[13];
+
+    cpuid(1, r);
+    if (!(r[2] & 0x80000000u)) {
+        return 0;
+    }
+    cpuid(0x40000000u, r);
+    memcpy(vendor, &r[1], 4);
+    memcpy(vendor + 4, &r[2], 4);
+    memcpy(vendor + 8, &r[3], 4);
+    vendor[12] = '\0';
+    return strncmp(vendor, "FEXIFEXIEMU", 11) == 0;
+}
+
 static void log_environment(const wchar_t *host_name)
 {
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
@@ -96,6 +131,9 @@ static void log_environment(const wchar_t *host_name)
     }
     if (wine_get_version) {
         LOGI("running under Wine/Proton %s", wine_get_version());
+    }
+    if (running_under_fex()) {
+        LOGI("running under the FEX x86 emulator (ARM processor)");
     }
     GetSystemInfo(&si);
     LOGI("logical processors visible to this 32-bit process: %lu", (unsigned long)si.dwNumberOfProcessors);

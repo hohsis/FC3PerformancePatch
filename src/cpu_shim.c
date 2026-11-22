@@ -3,6 +3,7 @@
  */
 #include "cpu_shim.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -25,6 +26,7 @@ static int g_sleep_yield;
 static LONG g_sleep_zero, g_sleep_one, g_sleep_other;
 static LONG64 g_sleep_one_ticks;
 static shim_module_loaded_fn g_loaded_cb;
+static LONG g_confined_logged;
 
 typedef struct fc3_group_affinity {
     ULONG_PTR Mask;
@@ -85,6 +87,78 @@ static int is_current_process(HANDLE h)
 }
 
 /* ---- topology query ------------------------------------------------------ */
+
+/* Reads a small decimal number from a file of the host system. Under Wine the
+ * host's file system is reachable through the "\\?\unix" prefix and, in the
+ * usual set-up, as drive Z:. Returns 0 when the file cannot be read. */
+static unsigned long read_host_number(const char *unix_path)
+{
+    static const char *const prefixes[] = {"\\\\?\\unix", "Z:"};
+    unsigned p;
+
+    for (p = 0; p < sizeof(prefixes) / sizeof(prefixes[0]); ++p) {
+        char path[160], text[32];
+        HANDLE h;
+        DWORD got = 0;
+        size_t i;
+
+        if (snprintf(path, sizeof(path), "%s%s", prefixes[p], unix_path) >= (int)sizeof(path)) {
+            continue;
+        }
+        for (i = 0; path[i]; ++i) {
+            if (path[i] == '/') {
+                path[i] = '\\';
+            }
+        }
+        h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+        if (h == INVALID_HANDLE_VALUE) {
+            continue;
+        }
+        if (ReadFile(h, text, sizeof(text) - 1, &got, NULL) && got) {
+            unsigned long v = 0;
+            text[got] = '\0';
+            for (i = 0; text[i] >= '0' && text[i] <= '9' && v < 100000000ul; ++i) {
+                v = v * 10 + (unsigned long)(text[i] - '0');
+            }
+            CloseHandle(h);
+            return v;
+        }
+        CloseHandle(h);
+    }
+    return 0;
+}
+
+/* Wine fills in EfficiencyClass only for Intel hybrid processors. On ARM
+ * processors with fast and slow cores (phones and handhelds that run x86
+ * games through FEX) every core is reported as class 0, and the slow cores
+ * usually come first - exactly the ones "the first N cores" would pick. The
+ * Linux kernel publishes each core's relative capacity; use it to tell them
+ * apart. */
+static void rank_cores_from_host(cpu_topology *topo)
+{
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    unsigned long capacity[FC3PP_MAX_CPUS];
+    unsigned i, classes;
+
+    if (!ntdll || !GetProcAddress(ntdll, "wine_get_version")) {
+        return; /* Windows reports the classes itself */
+    }
+    memset(capacity, 0, sizeof(capacity));
+    for (i = 0; i < FC3PP_MAX_CPUS; ++i) {
+        if (topo->cpu[i].present) {
+            char path[96];
+            snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%u/cpu_capacity", i);
+            capacity[i] = read_host_number(path);
+            if (!capacity[i]) {
+                return; /* not an ARM host, or the host's files are out of reach */
+            }
+        }
+    }
+    classes = cpu_topology_rank_by_capacity(topo, capacity);
+    if (classes) {
+        LOGI("cpu: the host reports cores of %u different speeds (cpu_capacity); faster cores are preferred", classes);
+    }
+}
 
 int shim_query_topology(cpu_topology *topo, unsigned long *process_mask, unsigned long *system_mask)
 {
@@ -151,6 +225,7 @@ int shim_query_topology(cpu_topology *topo, unsigned long *process_mask, unsigne
             }
         }
     }
+    rank_cores_from_host(topo);
     /* No usable topology, or one that does not overlap the processors this
      * process may run on: fall back to "every logical processor is a core". */
     {
@@ -317,6 +392,24 @@ static DWORD_PTR WINAPI hk_SetThreadAffinityMask(HANDLE thread, DWORD_PTR mask)
         return 0;
     }
     previous = r_SetThreadAffinityMask(thread, real_mask);
+    if (!previous) {
+        /* The processors chosen at start-up may no longer be available: some
+         * launchers (Android ones in particular) confine the process to other
+         * processors from outside once its window appears. The engine only
+         * wants its threads spread out; give it what is still possible
+         * rather than a failure it does not expect. */
+        DWORD_PTR pm = 0, sm = 0;
+        if (r_GetProcessAffinityMask(GetCurrentProcess(), &pm, &sm) && pm &&
+            ((unsigned long)pm & real_mask) != real_mask) {
+            unsigned long possible = real_mask & (unsigned long)pm;
+            previous = r_SetThreadAffinityMask(thread, possible ? possible : pm);
+            if (previous && InterlockedExchange(&g_confined_logged, 1) == 0) {
+                LOGI("cpu: the process was confined to other processors after start-up (affinity now 0x%08lX); "
+                     "engine threads are placed on what is left of the selection",
+                     (unsigned long)pm);
+            }
+        }
+    }
     if (trace_on()) {
         LOGD("trace: SetThreadAffinityMask(virtual 0x%08lX -> real 0x%08lX) -> 0x%08lX (tid %lu)",
              (unsigned long)mask, real_mask, (unsigned long)previous, (unsigned long)GetCurrentThreadId());

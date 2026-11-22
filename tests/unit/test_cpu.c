@@ -134,6 +134,51 @@ static void test_hybrid_prefers_performance_cores(void)
     CHECK_EQ_U(s.real_mask, (1ul << 2) | (1ul << 4));
 }
 
+/* ARM "big.LITTLE" under Wine: eight cores, all reported as class 0, the slow
+ * ones first. The host's cpu_capacity values tell them apart. */
+static void test_capacity_ranking(void)
+{
+    /* Snapdragon 8 Gen 2 layout: cpu0-2 small, cpu3-6 big, cpu7 prime */
+    static const unsigned long sm8550[FC3PP_MAX_CPUS] = {326, 326, 326, 811, 811, 866, 866, 1024};
+    static const unsigned long equal[FC3PP_MAX_CPUS] = {1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024};
+    static const unsigned long partial[FC3PP_MAX_CPUS] = {326, 326, 326, 811, 811, 866, 866, 0};
+    cpu_topology t;
+    cpu_selection s;
+    cpu_policy p = policy(6, 0, 1, 0);
+
+    /* Without the ranking the six slowest-numbered cores are taken, which
+     * includes every small core and leaves out the fastest one. */
+    cpu_topology_flat(&t, 0xFF);
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.real_mask, 0x3F);
+
+    CHECK_EQ_U(cpu_topology_rank_by_capacity(&t, sm8550), 4);
+    CHECK_EQ_U(t.cpu[0].eff_class, 0);
+    CHECK_EQ_U(t.cpu[3].eff_class, 1);
+    CHECK_EQ_U(t.cpu[5].eff_class, 2);
+    CHECK_EQ_U(t.cpu[7].eff_class, 3);
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.count, 6);
+    CHECK_EQ_U(s.real_mask, 0xF9); /* prime, four big, and one small core to make six */
+    p.max_cores = 4;
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.real_mask, 0xE8); /* cpu7, cpu5, cpu6, then the first of the next class */
+    /* a launcher that confines the game to the upper half of the processors */
+    p.max_cores = 6;
+    cpu_select(&t, 0xF0, &p, &s);
+    CHECK_EQ_U(s.real_mask, 0xF0);
+
+    /* nothing to do, and nothing changed, when ... */
+    cpu_topology_flat(&t, 0xFF);
+    CHECK_EQ_U(cpu_topology_rank_by_capacity(&t, equal), 0); /* all cores alike */
+    CHECK_EQ_U(cpu_topology_rank_by_capacity(&t, partial), 0); /* one value missing */
+    CHECK_EQ_U(cpu_topology_rank_by_capacity(&t, NULL), 0);
+    CHECK_EQ_U(t.cpu[7].eff_class, 0);
+    make_hybrid(&t, 2, 4); /* the system already reports classes */
+    CHECK_EQ_U(cpu_topology_rank_by_capacity(&t, sm8550), 0);
+    CHECK_EQ_U(t.cpu[0].eff_class, 1);
+}
+
 static void test_skip_core0(void)
 {
     cpu_topology t;
@@ -355,6 +400,7 @@ void suite_cpu(void)
     RUN(test_smt_pairs);
     RUN(test_unlimited_and_small_machines);
     RUN(test_hybrid_prefers_performance_cores);
+    RUN(test_capacity_ranking);
     RUN(test_skip_core0);
     RUN(test_respects_process_affinity);
     RUN(test_many_processors);

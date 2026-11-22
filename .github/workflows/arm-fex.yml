@@ -1,0 +1,62 @@
+name: ARM64 (FEX)
+
+# Runs the test suite on an ARM64 machine, with the 32-bit x86 test programs
+# executed by ARM64 Wine through the FEX emulator - the same arrangement Valve's
+# ARM builds of Proton use, and the one ARM handhelds run the game with.
+# Experimental and separate from the main CI: it depends on a third-party Wine
+# build (Hangover) and says nothing about big.LITTLE processors, GPUs or Android.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fex:
+    name: Linux ARM64 (tests under Wine + FEX)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      WINEDEBUG: -all
+      WINEDLLOVERRIDES: mscoree=;mshtml=
+      HODLL: libwow64fex.dll
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-i686 cmake
+
+      - name: Install Wine for ARM64 with FEX (Hangover)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir hangover && cd hangover
+          gh release download --repo AndreRH/hangover --pattern '*ubuntu2404_noble_arm64.tar'
+          tar -xf ./*.tar
+          ls -1
+          sudo apt-get install -y ./*.deb
+          command -v wine
+          wine --version
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-i686.cmake -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Prepare the Wine prefix
+        run: wine cmd /c ver
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Show what the patch saw
+        if: always()
+        run: |
+          log=$(find build/runtime-work/engine -name 'FC3PerformancePatch.log' | head -n 1)
+          if [ -n "$log" ]; then head -n 12 "$log"; fi

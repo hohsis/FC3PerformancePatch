@@ -61,6 +61,15 @@ unsigned cpu_topology_from_glpi_ex(cpu_topology *t, const unsigned char *buf, si
 /* Parses a SYSTEM_LOGICAL_PROCESSOR_INFORMATION buffer (32-bit layout). */
 unsigned cpu_topology_from_glpi(cpu_topology *t, const unsigned char *buf, size_t len);
 
+/* For systems that report no speed classes although the cores differ (Wine on
+ * ARM "big.LITTLE" processors leaves EfficiencyClass at 0 for every core, and
+ * there the slowest cores have the lowest numbers): assigns classes from a
+ * relative capacity per logical processor, larger = faster. Does nothing when
+ * the topology already has different classes, when a present processor has no
+ * capacity (0), or when all capacities are equal. Returns the number of
+ * classes assigned, 0 when nothing was changed. */
+unsigned cpu_topology_rank_by_capacity(cpu_topology *t, const unsigned long *capacity);
+
 /* Chooses the logical processors the engine should use. allowed_mask is the
  * real process affinity mask. The result never has more than
  * FC3PP_MAX_ENGINE_CPUS entries; out->count is 0 only if nothing is usable. */
