@@ -14,7 +14,7 @@ jobs:
     name: Windows (MSVC, 32-bit)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -36,10 +36,12 @@ jobs:
           $version = (Select-String -Path src/fc3pp.h -Pattern 'FC3PP_VERSION "([^"]+)"').Matches[0].Groups[1].Value
           $zip = "FC3PerformancePatch-$version.zip"
           Compress-Archive -Path build/package/FC3PerformancePatch/* -DestinationPath $zip
-          (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() + "  $zip" | Out-File -Encoding ascii "$zip.sha256"
+          # LF line ending, so "sha256sum --check" accepts the file on Linux as well.
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$PWD/$zip.sha256", "$hash  $zip`n")
           Get-Content "$zip.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: FC3PerformancePatch
           path: |
@@ -54,7 +56,7 @@ jobs:
       WINEDEBUG: -all
       WINEDLLOVERRIDES: mscoree=;mshtml=
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -86,17 +88,23 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: FC3PerformancePatch
+      - name: Fetch the package built by the Windows job
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --name FC3PerformancePatch
+
+      - name: Verify the checksum file
+        run: sha256sum --check FC3PerformancePatch-*.zip.sha256
 
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" FC3PerformancePatch-*.zip FC3PerformancePatch-*.zip.sha256 \
+          gh release create "$GITHUB_REF_NAME" \
+            FC3PerformancePatch-*.zip FC3PerformancePatch-*.zip.sha256 \
             --title "FC3PerformancePatch ${GITHUB_REF_NAME#v}" \
             --notes-file docs/RELEASE_NOTES.md
