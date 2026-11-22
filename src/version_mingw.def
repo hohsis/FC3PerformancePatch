@@ -1,0 +1,21 @@
+; Export table of the version.dll proxy (GNU ld / MinGW-w64).
+; __stdcall symbols carry their @N suffix; the exported names stay undecorated.
+LIBRARY version.dll
+EXPORTS
+    GetFileVersionInfoA         = fc3pp_GetFileVersionInfoA@16         @1
+    GetFileVersionInfoByHandle  = fc3pp_GetFileVersionInfoByHandle     @2
+    GetFileVersionInfoExA       = fc3pp_GetFileVersionInfoExA@20       @3
+    GetFileVersionInfoExW       = fc3pp_GetFileVersionInfoExW@20       @4
+    GetFileVersionInfoSizeA     = fc3pp_GetFileVersionInfoSizeA@8      @5
+    GetFileVersionInfoSizeExA   = fc3pp_GetFileVersionInfoSizeExA@12   @6
+    GetFileVersionInfoSizeExW   = fc3pp_GetFileVersionInfoSizeExW@12   @7
+    GetFileVersionInfoSizeW     = fc3pp_GetFileVersionInfoSizeW@8      @8
+    GetFileVersionInfoW         = fc3pp_GetFileVersionInfoW@16         @9
+    VerFindFileA                = fc3pp_VerFindFileA@32                @10
+    VerFindFileW                = fc3pp_VerFindFileW@32                @11
+    VerInstallFileA             = fc3pp_VerInstallFileA@32             @12
+    VerInstallFileW             = fc3pp_VerInstallFileW@32             @13
+    VerLanguageNameA            = fc3pp_VerLanguageNameA@12            @14
+    VerLanguageNameW            = fc3pp_VerLanguageNameW@12            @15
+    VerQueryValueA              = fc3pp_VerQueryValueA@16              @16
+    VerQueryValueW              = fc3pp_VerQueryValueW@16              @17
