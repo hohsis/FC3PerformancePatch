@@ -6,7 +6,7 @@ the same way.
 
 ## What an "ARM version" can and cannot be
 
-There is no ARM version of the game and this project cannot make one. The game is about 25 MB of
+There is no ARM version of the game and this project cannot make one. The game is about 29 MB of
 32-bit x86 machine code in Ubisoft's own files, without source code; turning that into ARM code is
 exactly what the emulator on your device does every time you play, and shipping a converted copy
 would mean distributing Ubisoft's files, which this project does not do.
