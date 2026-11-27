@@ -236,7 +236,16 @@ Proton and Android launchers work this way). Three things matter to this patch t
   exit path reads a complete one without taking a lock. File names of modules are logged, never
   their folders.
 
-FEX reports itself through the CPUID hypervisor leaf (`FEXIFEXIEMU`); the log notes it. Status: the whole
+What the engine's code is made of matters to an emulator; a linear disassembly of the executable
+sections of `FC3_d3d11.dll` (10.4 million instructions; data inside code adds some noise, so these
+are proportions) gives 5.9 % SSE instructions (two thirds of them scalar: the build uses SSE2 for
+floating point), 1.6 % x87 (two thirds of those `fld`/`fstp`, the 32-bit convention of returning
+floating-point values on the x87 stack, rather than arithmetic), 0.4 % `lock`-prefixed instructions
+and no `pause` at all (its waiting loops call `Sleep(0)`). [ARM.md](ARM.md) draws the practical
+conclusions for a player.
+
+FEX reports itself through the CPUID hypervisor leaf (`FEXIFEXIEMU`); the log notes it. Under FEX the
+automatic `SpareFastCores` applies whoever reported the speed classes. Status: the whole
 test suite, including the code patches executed as machine code and the hooks inside a host process, passes
 on a GitHub ARM64 runner under Wine 11 with FEX as the 32-bit CPU back end (Hangover's build). That machine
 has four identical cores and no GPU: core ranking is covered by unit tests with the layouts of the

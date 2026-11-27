@@ -55,6 +55,9 @@ In Steam: right-click the game > *Manage* > *Browse local files*, then open `bin
 WINEDLLOVERRIDES="version=n,b" %command%
 ```
 
+ARM handhelds (Armada OS and other systems that run the game through FEX): [ARM.md](ARM.md) has what the
+patch does there, what to try, and why there is no ARM build.
+
 On the first start the patch switches the executable to 4 GB of address space, which takes effect from
 the second start.
 
@@ -172,7 +175,8 @@ Not verified:
   real modded installation, but the result on screen was not yet checked.
 - The game under Proton or on a Steam Deck, on AMD or Intel graphics, or on a real 32-thread Intel processor.
 - The game on an ARM device. Only the test suite ran under FEX, on a machine whose cores are all alike;
-  the handling of fast and slow ARM cores is covered by unit tests alone.
+  the handling of fast and slow ARM cores is covered by unit tests and by a test with stand-in
+  processor files. Which core layout is faster there, and what the *Near* presets gain, is unknown.
 - Whether keeping `XAudio2_7.dll` loaded cures the crashes players report mid-session.
 
 Reports are welcome; please attach the log.

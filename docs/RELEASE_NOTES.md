@@ -38,8 +38,12 @@ default to on, the two extras to off. Copy the new INI too if you want them list
     you to judge. `-1` and `-2` (*Near*, *Very near*) go the other way for slow devices: less is
     drawn than the game's lowest settings allow. Those two have not been tried in the game yet.
 - **ARM handhelds (Wine with FEX).** Fast and slow cores are told apart there (Wine does not report
-  them), and the patch copes with launchers that move the game to other processors after it has
-  started. The test suite passes under FEX; the game itself has not been tried on such a device yet.
+  them); the two fastest are kept free of the game's pinned workers so that its main and render
+  threads can have them (`[CPU] SpareFastCores`); the patch copes with launchers that move the game
+  to other processors after it has started; and at exit the log lists the busiest threads and where
+  they ran (`[Debug] ThreadReport`), which is how a device reports back. `ARM.md` in the package
+  says what to try. The test suite passes under FEX; the game itself has not been tried on such a
+  device yet.
 - **DPI awareness.** The game is marked DPI aware, so on displays scaled above 100 % Windows no longer
   reports a smaller desktop to it or blurs windowed and borderless output (`[Display] HighDpiAware`).
 - Windows no longer swaps the game window for a "Not responding" ghost during long loads

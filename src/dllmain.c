@@ -368,7 +368,7 @@ static void setup_cpu(void)
     policy.skip_core0 = g_cfg.skip_core0;
     policy.explicit_mask = g_cfg.cores_mask;
     policy.spare_fastest = g_cfg.spare_fast_cores != CPU_SPARE_AUTO ? g_cfg.spare_fast_cores
-                           : topo.ranked_by_capacity                ? CPU_SPARE_WHEN_RANKED
+                           : topo.ranked_by_capacity || running_under_fex() ? CPU_SPARE_WHEN_RANKED
                                                                     : 0;
     if (g_cfg.cores_list_invalid) {
         LOGE("cpu: the Cores= list could not be parsed; using automatic selection");

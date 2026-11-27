@@ -90,6 +90,7 @@ add_custom_target(package_files ALL
         "${CMAKE_SOURCE_DIR}/config/FC3PerformancePatch.ini"
         "${CMAKE_SOURCE_DIR}/README.md"
         "${CMAKE_SOURCE_DIR}/TECHNICAL.md"
+        "${CMAKE_SOURCE_DIR}/ARM.md"
         "${CMAKE_SOURCE_DIR}/LICENSE"
         "${FC3PP_PACKAGE_DIR}/"
     DEPENDS fc3pp_version
