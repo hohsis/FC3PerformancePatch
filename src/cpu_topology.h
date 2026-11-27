@@ -28,6 +28,7 @@ typedef struct cpu_topology {
     cpu_logical cpu[FC3PP_MAX_CPUS]; /* indexed by logical processor number */
     unsigned core_count;
     cpu_topology_source source;
+    unsigned char ranked_by_capacity; /* the classes were assigned by cpu_topology_rank_by_capacity */
 } cpu_topology;
 
 typedef struct cpu_policy {
@@ -36,13 +37,26 @@ typedef struct cpu_policy {
     int prefer_pcores;   /* prefer the highest efficiency class */
     int skip_core0;      /* avoid the core that owns logical processor 0 when possible */
     unsigned long explicit_mask; /* non-zero: use exactly these logical processors */
+    int spare_fastest;   /* cores to leave out, fastest first, where the cores differ in speed: the
+                          * engine pins a worker to every core it is given, and its main and render
+                          * threads, which it does not pin, should find the fastest cores free.
+                          * Needs prefer_pcores. Never a core of the slowest kind, and at least two
+                          * cores are always left to select from. */
 } cpu_policy;
+
+/* What "automatic" means for spare_fastest where the patch had to rank the
+ * cores itself (ARM processors under Wine): the engine has two such threads. */
+#define CPU_SPARE_AUTO (-1)
+#define CPU_SPARE_WHEN_RANKED 2
+#define CPU_SPARE_MAX 4
 
 typedef struct cpu_selection {
     unsigned count;                      /* engine-visible logical processors */
     unsigned char real[FC3PP_MAX_CPUS];  /* virtual index -> real logical processor */
     unsigned long real_mask;             /* union of the selected real processors */
     unsigned cores;                      /* physical cores represented */
+    unsigned spared;                     /* cores left out as the fastest (cpu_policy.spare_fastest) */
+    unsigned long spared_mask;           /* their logical processors: not selected, but meant to be used */
 } cpu_selection;
 
 void cpu_topology_init(cpu_topology *t);

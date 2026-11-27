@@ -450,6 +450,106 @@ static void scenario_virtualized(const real_machine *m, int max_cores, int proce
     fx_sleep(1, 1);
 }
 
+/* Does the system itself say that some cores are faster than others (hybrid
+ * x86 processors on Windows)? Then the patch does not rank them itself. */
+static int system_reports_speed_classes(void)
+{
+    typedef BOOL(WINAPI * glpi_ex_fn)(int, void *, DWORD *);
+    glpi_ex_fn glpi_ex = (glpi_ex_fn)(void *)GetProcAddress(GetModuleHandleA("kernel32.dll"),
+                                                            "GetLogicalProcessorInformationEx");
+    static unsigned char buf[16384];
+    DWORD len = sizeof(buf), off = 0;
+    int first = -1;
+
+    if (!glpi_ex || !glpi_ex(0 /* RelationProcessorCore */, buf, &len)) {
+        return 0;
+    }
+    while (off + 12 <= len) {
+        DWORD size = *(DWORD *)(void *)(buf + off + 4);
+        int eff = buf[off + 9]; /* PROCESSOR_RELATIONSHIP.EfficiencyClass */
+        if (size < 12) {
+            break;
+        }
+        if (first < 0) {
+            first = eff;
+        } else if (eff != first) {
+            return 1;
+        }
+        off += size;
+    }
+    return 0;
+}
+
+/* A processor with faster and slower cores, as in ARM handhelds. The patch is
+ * pointed at a stand-in for the host's processor files (run_runtime.py writes
+ * them) which say that every logical processor from `first_fast` on is faster
+ * than the ones below. The engine pins a worker to every core it is given but
+ * not its main and render threads, so two of the fastest cores must be kept
+ * out of what the engine is given - and still be usable by a thread that asks
+ * for "anywhere". */
+static void scenario_fast_cores(const real_machine *m, int max_cores, unsigned first_fast)
+{
+    unsigned v = fx_nproc(), i, k, fast = 0, spare = 0, expected;
+    unsigned long spared_mask = 0, selected = 0, vfull;
+
+    if (system_reports_speed_classes()) {
+        printf("  this machine reports faster and slower cores itself; the stand-in files are not used\n");
+        return;
+    }
+    for (i = 0; i < m->cores; ++i) {
+        unsigned lowest = 0;
+        while (!((m->core_mask[i] >> lowest) & 1)) {
+            ++lowest;
+        }
+        if (lowest >= first_fast) {
+            ++fast;
+        }
+    }
+    if (fast > 0 && fast < m->cores && m->cores > 2) {
+        spare = fast < 2 ? fast : 2;
+        if (spare > m->cores - 2) {
+            spare = m->cores - 2;
+        }
+    }
+    /* the fast cores with the lowest numbers are the ones kept free */
+    for (i = 0, k = 0; i < m->cores && k < spare; ++i) {
+        unsigned lowest = 0;
+        while (!((m->core_mask[i] >> lowest) & 1)) {
+            ++lowest;
+        }
+        if (lowest >= first_fast) {
+            spared_mask |= m->core_mask[i];
+            ++k;
+        }
+    }
+    expected = m->cores - spare;
+    if (max_cores > 0 && (unsigned)max_cores < expected) {
+        expected = (unsigned)max_cores;
+    }
+    printf("  machine: %u cores, %u of them \"fast\" (logical processors from %u on); %u kept free (mask 0x%lX); "
+           "engine sees %u\n",
+           m->cores, fast, first_fast, spare, spared_mask, v);
+    CHECK(v == expected, "engine sees %u processors, expected %u", v, expected);
+    vfull = v >= 32 ? 0xFFFFFFFFul : (1ul << v) - 1;
+    for (k = 0; k < v; ++k) {
+        unsigned long real;
+        CHECK(fx_set_thread_affinity(1ul << k) != 0, "SetThreadAffinityMask(virtual %u) failed", k);
+        real = real_thread_affinity(m);
+        CHECK(popcount(real) == 1, "virtual processor %u maps to real mask 0x%lX (not exactly one)", k, real);
+        CHECK((real & spared_mask) == 0, "virtual processor %u is on a core that was to be kept free (0x%lX)", k, real);
+        selected |= real;
+    }
+    /* "Anywhere" includes the cores that were kept free: that is what they are for. */
+    CHECK(fx_set_thread_affinity(vfull) != 0, "SetThreadAffinityMask(all virtual) failed");
+    CHECK(real_thread_affinity(m) == (selected | spared_mask), "thread affinity 0x%lX after 'all', expected 0x%lX",
+          real_thread_affinity(m), selected | spared_mask);
+    CHECK(real_process_affinity() == m->process_mask, "Mode=engine must not restrict the process (0x%lX)",
+          real_process_affinity());
+    SetThreadAffinityMask(GetCurrentThread(), m->process_mask);
+    CHECK(fx_glpi_cores() == v, "GetLogicalProcessorInformation reports %u cores to the engine, expected %u",
+          fx_glpi_cores(), v);
+}
+
 /* Mode=off: nothing about the processor view changes, the loop is still fixed. */
 static void scenario_off(const real_machine *m, int fixed)
 {
@@ -1426,6 +1526,8 @@ int main(int argc, char **argv)
         scenario_virtualized(&machine, max_cores, 0);
     } else if (strcmp(scenario, "process") == 0) {
         scenario_virtualized(&machine, max_cores, 1);
+    } else if (strcmp(scenario, "fastcores") == 0) {
+        scenario_fast_cores(&machine, max_cores, argc > 3 ? (unsigned)atoi(argv[3]) : 0);
     } else if (strcmp(scenario, "off") == 0) {
         scenario_off(&machine, 1);
     } else if (strcmp(scenario, "off-nofix") == 0 || strcmp(scenario, "disabled") == 0) {

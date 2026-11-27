@@ -27,6 +27,8 @@ PASSIVE = "fc3pp_passive.exe"
 FIXTURES = ["FC3_d3d11.dll", "FC3.dll", "systemdetection.dll", "dxgi.dll", "xinput1_3.dll", "dinput8.dll"]
 LOG = "FC3PerformancePatch.log"
 INI = "FC3PerformancePatch.ini"
+# For the stand-in processor files: logical processors from this one on are the faster ones.
+FIRST_FAST_CPU = (os.cpu_count() or 2) // 2
 
 
 def ini(**kw):
@@ -67,6 +69,9 @@ SCENARIOS = {
     "engine-all-cores": (HARNESS, ini(max_cores=0), ["engine", "0"], True, ["Mode=engine", "initialised"], ["ERROR"]),
     "process": (HARNESS, ini(mode="process"), ["process", "3"], True,
                 ["Mode=process", "process affinity restricted to"], ["ERROR"]),
+    # An ARM-style processor: the upper half of the logical processors is faster (setup_host_cpus).
+    "fastcores": (HARNESS, ini(max_cores=6) + "HostSysRoot=hostsys\n",
+                  ["fastcores", "6", str(FIRST_FAST_CPU)], True, ["Mode=engine", "initialised"], ["ERROR"]),
     "off": (HARNESS, ini(mode="off"), ["off"], True,
             ["Mode=off", "fixed the processor-enumeration loop"], ["ERROR", "engine sees"]),
     "off-nofix": (HARNESS, ini(mode="off", fix=0), ["off-nofix"], True,
@@ -417,6 +422,16 @@ def setup_profile(d, with_archives=True):
             f.write(GAMER_PROFILE.encode("ascii"))
 
 
+def setup_host_cpus(d):
+    """A stand-in for the processor files of a Linux host, next to the test
+    host: every logical processor from FIRST_FAST_CPU on has a higher capacity."""
+    for cpu in range(64):
+        folder = os.path.join(d, "hostsys", "sys", "devices", "system", "cpu", "cpu%d" % cpu)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "cpu_capacity"), "w", newline="\n") as f:
+            f.write("%d\n" % (1024 if cpu >= FIRST_FAST_CPU else 792))
+
+
 def setup_profile_only(d):
     setup_profile(d, with_archives=False)
 
@@ -427,7 +442,7 @@ WITH_DATA = {"textures": setup_texture_archives, "textures-noscan": setup_textur
              "shared-tops": setup_shared_archives, "shared-tops-dx9": setup_shared_archives,
              "shared-tops-off": setup_shared_archives,
              "drawdistance": setup_profile, "drawdistance-off": setup_profile,
-             "drawdistance-nodata": setup_profile_only}
+             "drawdistance-nodata": setup_profile_only, "fastcores": setup_host_cpus}
 
 
 def run_scenario(args, name, env):

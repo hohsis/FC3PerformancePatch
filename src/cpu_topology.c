@@ -158,6 +158,7 @@ unsigned cpu_topology_rank_by_capacity(cpu_topology *t, const unsigned long *cap
             t->cpu[i].eff_class = (unsigned char)j;
         }
     }
+    t->ranked_by_capacity = 1;
     return n;
 }
 
@@ -255,6 +256,22 @@ void cpu_select(const cpu_topology *t, unsigned long allowed_mask, const cpu_pol
             --j;
         }
         order[j] = key;
+    }
+
+    /* Leave the fastest cores out, where there are faster and slower ones. */
+    if (policy->prefer_pcores && policy->spare_fastest > 0) {
+        unsigned char slowest = order[ncores - 1]->eff;
+        unsigned spare = 0;
+
+        while (spare < (unsigned)policy->spare_fastest && spare + 2 < ncores && order[spare]->eff > slowest) {
+            for (j = 0; j < order[spare]->n; ++j) {
+                out->spared_mask |= 1ul << order[spare]->cpus[j];
+            }
+            ++spare;
+        }
+        out->spared = spare;
+        ncores -= spare;
+        memmove(order, order + spare, ncores * sizeof(order[0]));
     }
 
     per_core = policy->use_smt ? 2u : 1u;

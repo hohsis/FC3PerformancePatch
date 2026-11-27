@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "config.h"
+#include "cpu_topology.h"
 #include "ini.h"
 #include "test.h"
 
@@ -177,6 +178,7 @@ static void test_config_defaults(void)
     CHECK(c.trace_audio == 0); /* diagnostics default to off */
     CHECK(c.auto_switch_input == 0); /* not yet confirmed in play: opt-in */
     CHECK(c.draw_distance == 0 && c.draw_distance_invalid == 0);
+    CHECK(c.spare_fast_cores == CPU_SPARE_AUTO && c.host_sys_root[0] == '\0');
 }
 
 static void test_config_values(void)
@@ -220,6 +222,9 @@ static void test_config_bad_values(void)
 {
     static const char text[] = "[CPU]\nMode=banana\nCores=1,x\nMaxCores=lots\n[Graphics]\nDrawDistance=3\n[Menu]\nPadButtons=A\nScale=900\n";
     static const char no_pad[] = "[Menu]\nPadButtons=None\nScale=10\n";
+    static const char spare_two[] = "[CPU]\nSpareFastCores=2\n[Debug]\nHostSysRoot=C:\\fake root\n";
+    static const char spare_many[] = "[CPU]\nSpareFastCores=99\n";
+    static const char spare_auto[] = "[CPU]\nSpareFastCores=Auto\n";
     static const char far_name[] = "[Graphics]\nDrawDistance=Far\n";
     static const char very_far[] = "[Graphics]\nDrawDistance=VeryFar\n";
     static const char original[] = "[Graphics]\nDrawDistance=original\n";
@@ -234,6 +239,10 @@ static void test_config_bad_values(void)
     CHECK(c.menu_scale == 200);                                  /* clamped */
     CHECK(config_load_text(&c, no_pad, sizeof(no_pad) - 1) == 0 && c.menu_pad == 0 && c.menu_pad_invalid == 0 &&
           c.menu_scale == 100);
+    CHECK(config_load_text(&c, spare_two, sizeof(spare_two) - 1) == 0 && c.spare_fast_cores == 2);
+    CHECK_STR(c.host_sys_root, "C:\\fake root");
+    CHECK(config_load_text(&c, spare_many, sizeof(spare_many) - 1) == 0 && c.spare_fast_cores == CPU_SPARE_MAX);
+    CHECK(config_load_text(&c, spare_auto, sizeof(spare_auto) - 1) == 0 && c.spare_fast_cores == CPU_SPARE_AUTO);
     CHECK(config_load_text(&c, far_name, sizeof(far_name) - 1) == 0 && c.draw_distance == 1);
     CHECK(config_load_text(&c, very_far, sizeof(very_far) - 1) == 0 && c.draw_distance == 2);
     CHECK(config_load_text(&c, original, sizeof(original) - 1) == 0 && c.draw_distance == 0 &&

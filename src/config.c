@@ -22,6 +22,7 @@ void config_defaults(fc3pp_config *cfg)
     cfg->use_smt = 0;
     cfg->prefer_performance_cores = 1;
     cfg->skip_core0 = 0;
+    cfg->spare_fast_cores = CPU_SPARE_AUTO;
     cfg->timer_resolution_ms = 1;
     cfg->sleep_zero_yield = 0;
     cfg->apply_large_address_aware = 1;
@@ -109,6 +110,15 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
     cfg->prefer_performance_cores =
         ini_get_bool(&doc, "CPU", "PreferPerformanceCores", cfg->prefer_performance_cores);
     cfg->skip_core0 = ini_get_bool(&doc, "CPU", "SkipCore0", cfg->skip_core0);
+    {
+        const char *spare = ini_get(&doc, "CPU", "SpareFastCores");
+        if (spare && *spare) {
+            cfg->spare_fast_cores =
+                ini_streq_nocase(spare, "auto")
+                    ? CPU_SPARE_AUTO
+                    : (int)ini_get_int_clamped(&doc, "CPU", "SpareFastCores", 0, 0, CPU_SPARE_MAX);
+        }
+    }
     cores = ini_get(&doc, "CPU", "Cores");
     if (cores && *cores) {
         unsigned long mask = 0;
@@ -182,6 +192,12 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
     cfg->input_without_focus = ini_get_bool(&doc, "Debug", "InputWithoutFocus", cfg->input_without_focus);
     cfg->simulate_affinity_mask =
         ini_get_uint(&doc, "Debug", "SimulateAffinityMask", cfg->simulate_affinity_mask) & 0xFFFFFFFFul;
+    {
+        const char *root = ini_get(&doc, "Debug", "HostSysRoot");
+        if (root && strlen(root) < sizeof(cfg->host_sys_root)) {
+            strcpy(cfg->host_sys_root, root);
+        }
+    }
 
     ini_free(&doc);
     return 0;

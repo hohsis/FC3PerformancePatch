@@ -26,6 +26,10 @@ typedef enum shim_kind {
  * returned a module. */
 typedef void (*shim_module_loaded_fn)(HMODULE mod);
 
+/* Testing aid: read the host's processor files ("/sys/devices/system/cpu/...")
+ * from under this folder, on any system. Call before shim_query_topology. */
+void shim_set_host_root(const char *folder);
+
 /* Queries the real topology. Returns 0 on success. */
 int shim_query_topology(cpu_topology *topo, unsigned long *process_mask, unsigned long *system_mask);
 

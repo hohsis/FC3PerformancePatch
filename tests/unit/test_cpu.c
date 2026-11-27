@@ -179,6 +179,109 @@ static void test_capacity_ranking(void)
     CHECK_EQ_U(t.cpu[0].eff_class, 1);
 }
 
+/* Processors with faster and slower cores, and an engine that pins a worker
+ * to every core it is given but leaves its main and render threads to the
+ * system: the fastest cores can be kept out of the selection for those. */
+static void test_spare_fastest(void)
+{
+    /* Snapdragon 8 Elite (AYN Odin 3): cpu0-5 performance, cpu6-7 prime */
+    static const unsigned long sm8750[FC3PP_MAX_CPUS] = {792, 792, 792, 792, 792, 792, 1024, 1024};
+    static const unsigned long sm8550[FC3PP_MAX_CPUS] = {326, 326, 326, 811, 811, 866, 866, 1024};
+    static const unsigned long two_two[FC3PP_MAX_CPUS] = {400, 400, 1024, 1024};
+    cpu_topology t;
+    cpu_selection s;
+    cpu_policy p = policy(6, 0, 1, 0);
+
+    cpu_topology_flat(&t, 0xFF);
+    CHECK(!t.ranked_by_capacity);
+    CHECK_EQ_U(cpu_topology_rank_by_capacity(&t, sm8750), 2);
+    CHECK(t.ranked_by_capacity);
+
+    /* as before: the six fastest, which puts workers on both prime cores */
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.real_mask, 0xCF);
+    CHECK(s.spared == 0 && s.spared_mask == 0);
+
+    /* two kept free: the six performance cores get the workers */
+    p.spare_fastest = 2;
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.real_mask, 0x3F);
+    CHECK_EQ_U(s.count, 6);
+    CHECK_EQ_U(s.cores, 6);
+    CHECK_EQ_U(s.spared, 2);
+    CHECK_EQ_U(s.spared_mask, 0xC0);
+    CHECK_EQ_U(s.real[0], 0); /* in ascending order, as always */
+    CHECK_EQ_U(s.real[5], 5);
+    p.spare_fastest = 1;
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.spared_mask, 0x40);
+    CHECK_EQ_U(s.real_mask, 0x9F); /* the other prime core and five performance cores */
+    /* more asked for than there are faster cores: only the faster ones */
+    p.spare_fastest = 4;
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.spared_mask, 0xC0);
+    CHECK_EQ_U(s.real_mask, 0x3F);
+    /* fewer cores wanted than are left */
+    p.spare_fastest = 2;
+    p.max_cores = 4;
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.real_mask, 0x0F);
+    CHECK_EQ_U(s.spared_mask, 0xC0);
+    /* a launcher that confines the game to four processors, the prime ones among them */
+    p.max_cores = 6;
+    cpu_select(&t, 0xF0, &p, &s);
+    CHECK_EQ_U(s.spared_mask, 0xC0);
+    CHECK_EQ_U(s.real_mask, 0x30);
+    /* ... or to three: at least two stay selectable */
+    cpu_select(&t, 0xE0, &p, &s);
+    CHECK_EQ_U(s.spared_mask, 0x40);
+    CHECK_EQ_U(s.real_mask, 0xA0);
+    /* ... or to the prime cores alone: nothing is faster than anything else */
+    cpu_select(&t, 0xC0, &p, &s);
+    CHECK(s.spared == 0);
+    CHECK_EQ_U(s.real_mask, 0xC0);
+
+    /* needs the order by speed; an explicit list is taken as it is */
+    p.prefer_pcores = 0;
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK(s.spared == 0);
+    CHECK_EQ_U(s.real_mask, 0x3F);
+    p.prefer_pcores = 1;
+    p.explicit_mask = 0xF0;
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK(s.spared == 0);
+    CHECK_EQ_U(s.real_mask, 0xF0);
+    p.explicit_mask = 0;
+
+    /* four kinds of core (Snapdragon 8 Gen 2): the prime core and one of the next kind */
+    cpu_topology_flat(&t, 0xFF);
+    cpu_topology_rank_by_capacity(&t, sm8550);
+    cpu_select(&t, 0xFF, &p, &s);
+    CHECK_EQ_U(s.spared_mask, 0xA0); /* cpu7 and cpu5 */
+    CHECK_EQ_U(s.real_mask, 0x5F);   /* the six that are left */
+
+    /* two fast and two slow cores: both fast ones can be spared, two remain */
+    cpu_topology_flat(&t, 0x0F);
+    cpu_topology_rank_by_capacity(&t, two_two);
+    cpu_select(&t, 0x0F, &p, &s);
+    CHECK_EQ_U(s.spared_mask, 0x0C);
+    CHECK_EQ_U(s.real_mask, 0x03);
+
+    /* cores that are all alike: nothing is spared, whatever is asked for */
+    make_smt(&t, 8);
+    p.spare_fastest = 2;
+    cpu_select(&t, 0xFFFF, &p, &s);
+    CHECK(s.spared == 0 && s.spared_mask == 0);
+    CHECK_EQ_U(s.real_mask, 0x555);
+
+    /* a hybrid x86 processor with the setting on: both threads of a spared core are free */
+    make_hybrid(&t, 8, 8);
+    cpu_select(&t, 0xFFFFFF, &p, &s);
+    CHECK_EQ_U(s.spared, 2);
+    CHECK_EQ_U(s.spared_mask, 0x0F);
+    CHECK_EQ_U(s.real_mask, 0x5550);
+}
+
 static void test_skip_core0(void)
 {
     cpu_topology t;
@@ -401,6 +504,7 @@ void suite_cpu(void)
     RUN(test_unlimited_and_small_machines);
     RUN(test_hybrid_prefers_performance_cores);
     RUN(test_capacity_ranking);
+    RUN(test_spare_fastest);
     RUN(test_skip_core0);
     RUN(test_respects_process_affinity);
     RUN(test_many_processors);

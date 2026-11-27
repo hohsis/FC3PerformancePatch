@@ -91,13 +91,26 @@ static int is_current_process(HANDLE h)
 /* Reads a small decimal number from a file of the host system. Under Wine the
  * host's file system is reachable through the "\\?\unix" prefix and, in the
  * usual set-up, as drive Z:. Returns 0 when the file cannot be read. */
+static char g_host_root[200];
+
+void shim_set_host_root(const char *folder)
+{
+    if (folder && strlen(folder) < sizeof(g_host_root)) {
+        strcpy(g_host_root, folder);
+    }
+}
+
 static unsigned long read_host_number(const char *unix_path)
 {
-    static const char *const prefixes[] = {"\\\\?\\unix", "Z:"};
-    unsigned p;
+    const char *prefixes[2] = {"\\\\?\\unix", "Z:"};
+    unsigned p, count = 2;
 
-    for (p = 0; p < sizeof(prefixes) / sizeof(prefixes[0]); ++p) {
-        char path[160], text[32];
+    if (g_host_root[0]) {
+        prefixes[0] = g_host_root;
+        count = 1;
+    }
+    for (p = 0; p < count; ++p) {
+        char path[320], text[32];
         HANDLE h;
         DWORD got = 0;
         size_t i;
@@ -140,7 +153,7 @@ static void rank_cores_from_host(cpu_topology *topo)
     unsigned long capacity[FC3PP_MAX_CPUS];
     unsigned i, classes;
 
-    if (!ntdll || !GetProcAddress(ntdll, "wine_get_version")) {
+    if (!g_host_root[0] && (!ntdll || !GetProcAddress(ntdll, "wine_get_version"))) {
         return; /* Windows reports the classes itself */
     }
     memset(capacity, 0, sizeof(capacity));
@@ -387,6 +400,10 @@ static DWORD_PTR WINAPI hk_SetThreadAffinityMask(HANDLE thread, DWORD_PTR mask)
         return previous;
     }
     real_mask = cpu_v2r_mask(&g_sel, (unsigned long)mask & g_vfull);
+    if (((unsigned long)mask & g_vfull) == g_vfull) {
+        /* "Anywhere": that includes the cores kept free of pinned workers. */
+        real_mask |= g_sel.spared_mask;
+    }
     if (!real_mask) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
@@ -411,8 +428,9 @@ static DWORD_PTR WINAPI hk_SetThreadAffinityMask(HANDLE thread, DWORD_PTR mask)
         }
     }
     if (trace_on()) {
-        LOGD("trace: SetThreadAffinityMask(virtual 0x%08lX -> real 0x%08lX) -> 0x%08lX (tid %lu)",
-             (unsigned long)mask, real_mask, (unsigned long)previous, (unsigned long)GetCurrentThreadId());
+        LOGD("trace: SetThreadAffinityMask(virtual 0x%08lX -> real 0x%08lX) -> 0x%08lX (thread %lu, called by tid %lu)",
+             (unsigned long)mask, real_mask, (unsigned long)previous, (unsigned long)GetThreadId(thread),
+             (unsigned long)GetCurrentThreadId());
     }
     if (!previous) {
         return 0;
@@ -437,8 +455,8 @@ static DWORD WINAPI hk_SetThreadIdealProcessor(HANDLE thread, DWORD ideal)
     }
     previous = r_SetThreadIdealProcessor(thread, ideal);
     if (trace_on()) {
-        LOGD("trace: SetThreadIdealProcessor(real %lu) -> %ld (tid %lu)", (unsigned long)ideal, (long)previous,
-             (unsigned long)GetCurrentThreadId());
+        LOGD("trace: SetThreadIdealProcessor(real %lu) -> %ld (thread %lu, called by tid %lu)", (unsigned long)ideal,
+             (long)previous, (unsigned long)GetThreadId(thread), (unsigned long)GetCurrentThreadId());
     }
     if (previous == (DWORD)-1) {
         return previous;

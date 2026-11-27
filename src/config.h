@@ -24,6 +24,7 @@ typedef struct fc3pp_config {
     int use_smt;
     int prefer_performance_cores;
     int skip_core0;
+    int spare_fast_cores;     /* cores of the fastest kind to keep free of pinned workers; -1 = automatic */
     unsigned long cores_mask; /* explicit logical processor list, 0 = automatic */
     int cores_list_invalid;   /* the Cores= value could not be parsed */
 
@@ -68,6 +69,7 @@ typedef struct fc3pp_config {
     int menu_open_at_start;  /* testing aid */
     int input_without_focus; /* testing aid */
     unsigned long simulate_affinity_mask;
+    char host_sys_root[200]; /* testing aid: a folder to read the host's processor files from */
 
     size_t malformed_lines;
 } fc3pp_config;

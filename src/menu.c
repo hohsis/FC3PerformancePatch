@@ -21,6 +21,7 @@
 #include "log.h"
 #include "menu_draw.h"
 #include "menu_model.h"
+#include "cpu_topology.h"
 #include "gfx_preset.h"
 #include "gfx_profile.h"
 #include "overlay.h"
@@ -41,6 +42,7 @@ enum {
     ID_MAX_CORES,
     ID_USE_SMT,
     ID_CPU_MODE,
+    ID_SPARE_FAST,
     ID_RESTORE_FULLSCREEN,
     ID_DPI_AWARE,
     ID_TEX_MISMATCHED,
@@ -54,6 +56,7 @@ enum {
 };
 
 static const char *const MODE_NAMES[] = {"off", "engine", "process"};
+static const char *const SPARE_NAMES[] = {"Auto", "0", "1", "2", "3", "4"};
 static const char *const DISTANCE_NAMES[] = {"Original", "Far", "Very far"};
 static const char *const SCALE_NAMES[] = {"100 %", "125 %", "150 %", "175 %", "200 %"};
 #define SCALE_STEPS 5
@@ -79,6 +82,10 @@ static mm_item g_items[] = {
      "engine: the game's own threads use the chosen cores. process: drivers and sound are limited to them too. "
      "off: the game's own handling.",
      1, 0, 2, 1, MODE_NAMES, 3, MM_RESTART, "", 0},
+    {MM_CHOICE, ID_SPARE_FAST, "Fast cores kept free",
+     "Where cores differ in speed (ARM handhelds), the game's workers stay off this many of the fastest "
+     "cores, so its main and render threads get them. Auto: 2 there, 0 elsewhere.",
+     0, 0, CPU_SPARE_MAX + 1, 1, SPARE_NAMES, CPU_SPARE_MAX + 2, MM_RESTART, "", 0},
     HEADING("Display"),
     TOGGLE(ID_RESTORE_FULLSCREEN, "Fullscreen after Alt+Tab",
            "Return to fullscreen when you switch back to the game, instead of staying in a window."),
@@ -171,6 +178,7 @@ void menu_init(const fc3pp_config *cfg, const wchar_t *ini_path)
     set_value(ID_MAX_CORES, cfg->max_cores);
     set_value(ID_USE_SMT, cfg->use_smt);
     set_value(ID_CPU_MODE, (int)cfg->mode);
+    set_value(ID_SPARE_FAST, cfg->spare_fast_cores < 0 ? 0 : cfg->spare_fast_cores + 1);
     set_value(ID_RESTORE_FULLSCREEN, cfg->restore_fullscreen);
     set_value(ID_DPI_AWARE, cfg->high_dpi_aware);
     set_value(ID_TEX_MISMATCHED, cfg->texture_guard);
@@ -231,6 +239,14 @@ static void save(int id)
     case ID_CPU_MODE:
         section = L"CPU", key = L"Mode";
         _snwprintf(value, 32, L"%hs", MODE_NAMES[it->value >= 0 && it->value < 3 ? it->value : 1]);
+        break;
+    case ID_SPARE_FAST:
+        section = L"CPU", key = L"SpareFastCores";
+        if (it->value <= 0) {
+            _snwprintf(value, 32, L"auto");
+        } else {
+            _snwprintf(value, 32, L"%d", it->value - 1);
+        }
         break;
     case ID_RESTORE_FULLSCREEN:
         section = L"Display", key = L"RestoreFullscreenOnFocus";

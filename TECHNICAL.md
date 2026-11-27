@@ -198,6 +198,26 @@ Proton and Android launchers work this way). Three things matter to this patch t
   Under Wine, when no classes are reported, the patch reads each core's
   `/sys/devices/system/cpu/cpuN/cpu_capacity` (through `\\?\unix\...`, falling back to drive `Z:`) and
   ranks the cores by it. If the files cannot be read, nothing changes.
+- **The fastest cores are kept free of workers** (`[CPU] SpareFastCores`, automatic). What the engine
+  does with the processors it is given, from the call trace of the running game with six of them: one
+  thread sets six others to one processor each (the job manager's workers; its worker count is the
+  processor count, the constant it would subtract for other threads is 0), and a number of threads
+  are set to "all processors". Nothing else is placed: the thread class's start routine applies a
+  global affinity mask only if it is non-zero, and the only reference to that variable in the whole
+  DLL is that read. So the threads that limit the frame rate in this engine, its main and render
+  threads, go where the system puts them, while every core handed to the engine has a pinned worker
+  on it. "The six fastest cores" is therefore the wrong choice where the cores differ: on a
+  Snapdragon 8 Elite (two prime cores at 4.3 GHz, six performance cores at 3.5 GHz) it pins workers
+  to both prime cores and leaves two of the slower ones for everything else. Where the patch had to
+  rank the cores itself it now keeps the two fastest out of the selection (never a core of the
+  slowest kind, and at least two cores stay selectable): the workers get the six performance cores,
+  and a capacity-aware scheduler has two free prime cores for the busiest unpinned threads. An
+  engine request for "all processors" includes the spared cores, and so does the process affinity
+  of `Mode=process`. On Windows the setting is 0 unless set by hand: hybrid x86 processors have
+  enough performance cores for six workers and more.
+  *This is reasoning from the engine's code and from how Linux places threads, not a measurement.*
+  Which of the two layouts is faster on a given device has to be tried there; the setting is in the
+  in-game menu for that reason.
 - **Being moved afterwards.** Android launchers confine the game to a set of processors from outside,
   after its window appears. An engine request for a processor the process has since lost would fail;
   the patch then places the thread on what is left of the request, or anywhere in the process's set.
@@ -205,8 +225,11 @@ Proton and Android launchers work this way). Three things matter to this patch t
 FEX reports itself through the CPUID hypervisor leaf (`FEXIFEXIEMU`); the log notes it. Status: the whole
 test suite, including the code patches executed as machine code and the hooks inside a host process, passes
 on a GitHub ARM64 runner under Wine 11 with FEX as the 32-bit CPU back end (Hangover's build). That machine
-has four identical cores and no GPU: core ranking is covered by unit tests with a big.LITTLE layout, the
-confinement case by the runtime test, and **the game itself has not been run on an ARM device.**
+has four identical cores and no GPU: core ranking is covered by unit tests with the layouts of the
+Snapdragon 8 Gen 2 and 8 Elite, and by a runtime test that points the patch at stand-in processor files
+in which half of the test machine's processors are faster (`[Debug] HostSysRoot`), then checks from
+inside the stand-in engine which real processors it was given; the confinement case by the runtime
+test. **The game itself has not been run on an ARM device.**
 
 ## 4. Timing
 

@@ -343,6 +343,7 @@ static void setup_cpu(void)
     static const char *const sources[] = {"none", "GetLogicalProcessorInformationEx",
                                           "GetLogicalProcessorInformation", "GetSystemInfo (flat)"};
 
+    shim_set_host_root(g_cfg.host_sys_root);
     shim_query_topology(&topo, &process_mask, &system_mask);
     LOGI("cpu: %u physical core%s detected via %s; process affinity 0x%08lX, system 0x%08lX", topo.core_count,
          topo.core_count == 1 ? "" : "s", sources[topo.source], process_mask, system_mask);
@@ -365,6 +366,9 @@ static void setup_cpu(void)
     policy.prefer_pcores = g_cfg.prefer_performance_cores;
     policy.skip_core0 = g_cfg.skip_core0;
     policy.explicit_mask = g_cfg.cores_mask;
+    policy.spare_fastest = g_cfg.spare_fast_cores != CPU_SPARE_AUTO ? g_cfg.spare_fast_cores
+                           : topo.ranked_by_capacity                ? CPU_SPARE_WHEN_RANKED
+                                                                    : 0;
     if (g_cfg.cores_list_invalid) {
         LOGE("cpu: the Cores= list could not be parsed; using automatic selection");
     }
@@ -385,6 +389,11 @@ static void setup_cpu(void)
     LOGI("cpu: Mode=%s - engine sees %u logical processor%s on %u core%s (real processors %s, mask 0x%08lX)",
          config_mode_name(g_cfg.mode), sel.count, sel.count == 1 ? "" : "s", sel.cores, sel.cores == 1 ? "" : "s",
          list, sel.real_mask);
+    if (sel.spared) {
+        LOGI("cpu: the %u fastest core%s (mask 0x%08lX) get%s no worker of the game pinned to them: its main "
+             "and render threads, which it does not pin, can have them ([CPU] SpareFastCores)",
+             sel.spared, sel.spared == 1 ? "" : "s", sel.spared_mask, sel.spared == 1 ? "s" : "");
+    }
     {
         char status[96];
         snprintf(status, sizeof(status), "%u of %u cores, %u threads", sel.cores, topo.core_count, sel.count);
@@ -394,10 +403,11 @@ static void setup_cpu(void)
     shim_configure(SHIM_VIRTUALIZE, &topo, &sel, &g_cfg);
 
     if (g_cfg.mode == CPU_MODE_PROCESS) {
-        if (SetProcessAffinityMask(GetCurrentProcess(), (DWORD_PTR)sel.real_mask)) {
-            LOGI("cpu: process affinity restricted to 0x%08lX", sel.real_mask);
+        unsigned long whole = sel.real_mask | sel.spared_mask;
+        if (SetProcessAffinityMask(GetCurrentProcess(), (DWORD_PTR)whole)) {
+            LOGI("cpu: process affinity restricted to 0x%08lX", whole);
         } else {
-            LOGE("cpu: SetProcessAffinityMask(0x%08lX) failed (error %lu)", sel.real_mask,
+            LOGE("cpu: SetProcessAffinityMask(0x%08lX) failed (error %lu)", whole,
                  (unsigned long)GetLastError());
         }
     }
