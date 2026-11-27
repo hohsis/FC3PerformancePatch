@@ -1619,6 +1619,9 @@ int main(int argc, char **argv)
         scenario_shared_tops(1);
     } else if (strcmp(scenario, "shared-tops-off") == 0) {
         scenario_shared_tops(0);
+        /* Nothing asks for the archive scan's result here, so it starts on its
+         * own after three seconds; its warning is what this scenario is about. */
+        Sleep(3600);
     } else if (strcmp(scenario, "textures") == 0) {
         scenario_textures(1, 1);
     } else if (strcmp(scenario, "textures-noscan") == 0) {
@@ -1632,5 +1635,16 @@ int main(int argc, char **argv)
         return 2;
     }
     printf("%d checks, %d failures\n", g_checks, g_failures);
+    {
+        /* A game does not end in the millisecond in which a helper thread of
+         * the patch finishes; a test does. Under Wine with the FEX emulator a
+         * process that ends at that moment hangs now and then (2 of 60 runs of
+         * the "textures" scenario, whose archive scan ends 1 ms before the
+         * process), so the test driver asks for a moment in between. */
+        const char *linger = getenv("FC3PP_TEST_LINGER_MS");
+        if (linger && atoi(linger) > 0) {
+            Sleep((DWORD)atoi(linger));
+        }
+    }
     return g_failures ? 1 : 0;
 }

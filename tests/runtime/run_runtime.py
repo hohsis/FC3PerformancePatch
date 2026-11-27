@@ -604,6 +604,8 @@ def main():
     ap.add_argument("--only", action="append")
     ap.add_argument("--repeat", type=int, default=1, help="run the chosen scenarios this many times")
     ap.add_argument("--timeout", type=int, default=0, help="seconds after which a host counts as hung")
+    ap.add_argument("--linger-ms", type=int, default=200,
+                    help="time the host waits before it ends (see the end of harness.c); 0 = none")
     args = ap.parse_args()
     args.bin_dir = os.path.abspath(args.bin_dir)
     args.dll = os.path.abspath(args.dll)
@@ -617,6 +619,7 @@ def main():
         # entries are for the test's fake DLLs only.
         env["WINEDLLOVERRIDES"] = "version=n,b;dxgi=n,b;xinput1_3=n,b;dinput8=n,b"
         env.setdefault("WINEDEBUG", "-all")
+    env["FC3PP_TEST_LINGER_MS"] = str(args.linger_ms)
 
     if args.timeout:
         global RUN_TIMEOUT

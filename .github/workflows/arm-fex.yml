@@ -70,9 +70,13 @@ jobs:
           SCENARIO: ${{ inputs.stress_scenario }}
           COUNT: ${{ inputs.stress_count }}
         run: |
-          python3 tests/runtime/run_runtime.py --bin-dir build/runtime --dll build/version.dll \
-            --work-dir build/stress-work --emulator=wine --only "$SCENARIO" --repeat "$COUNT" --timeout 60 \
-            | grep -v '^\[ OK \]'
+          for linger in 200 0; do
+            echo "=== the host waits $linger ms before it ends"
+            python3 tests/runtime/run_runtime.py --bin-dir build/runtime --dll build/version.dll \
+              --work-dir build/stress-work --emulator=wine --only "$SCENARIO" --repeat "$COUNT" --timeout 45 \
+              --linger-ms "$linger" | grep -v '^\[ OK \]' | cut -c1-300 || true
+            wineserver -k || true
+          done
 
       - name: Show what the patch saw
         if: always()

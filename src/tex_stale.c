@@ -14,6 +14,12 @@
 #define MAX_FAT_BYTES (64u << 20)
 #define MAX_STALE 4096
 #define FIRST_WAIT_MS 5000
+/* The scan starts this long after the engine was found, or at once when its
+ * result is first asked for. The game starts twice: the first process only
+ * hands over to the launcher and is gone within a second, and it should not
+ * read forty archive indexes for nothing - nor be ended, as every process is
+ * in the end, while a thread of the patch is in the middle of its work. */
+#define START_DELAY_MS 3000
 #define PATH_CHARS (MAX_PATH * 2)
 
 typedef struct archive {
@@ -33,6 +39,7 @@ static unsigned long long g_shared_ids[MAX_SHARED * 2]; /* the same files by con
 static volatile LONG g_shared_name_count, g_shared_id_count;
 static volatile LONG g_shared_handled, g_want_replaced;
 static HANDLE g_done;
+static HANDLE g_needed; /* set when somebody asks for the result */
 static volatile LONG g_started;
 static volatile LONG g_waited;
 
@@ -237,6 +244,10 @@ static DWORD WINAPI scan_thread(LPVOID unused)
 
     (void)unused;
     memset(&stats, 0, sizeof(stats));
+    if (g_needed) {
+        WaitForSingleObject(g_needed, START_DELAY_MS);
+        started = GetTickCount();
+    }
     /* "<game>\bin\<exe>"  ->  "<game>\data_win32" */
     if (GetModuleFileNameW(NULL, dir, MAX_PATH)) {
         dir[MAX_PATH - 1] = L'\0';
@@ -316,6 +327,7 @@ void tex_stale_start(void)
     if (!g_done) {
         return;
     }
+    g_needed = CreateEventW(NULL, TRUE, FALSE, NULL); /* without it the scan simply starts at once */
     thread = CreateThread(NULL, 0, scan_thread, NULL, 0, NULL);
     if (thread) {
         CloseHandle(thread);
@@ -335,6 +347,9 @@ int tex_stale_check(const void *buffer, const void *dds, unsigned dds_size)
     }
     /* The engine streams its first top level long after start-up; if the scan
      * is still running then (slow disk), give it a moment, once. */
+    if (g_needed) {
+        SetEvent(g_needed);
+    }
     if (WaitForSingleObject(g_done, InterlockedExchange(&g_waited, 1) ? 0 : FIRST_WAIT_MS) != WAIT_OBJECT_0) {
         return 0;
     }
@@ -358,6 +373,9 @@ static int scan_done(void)
 {
     if (!g_done) {
         return 0;
+    }
+    if (g_needed) {
+        SetEvent(g_needed);
     }
     return WaitForSingleObject(g_done, InterlockedExchange(&g_waited, 1) ? 0 : FIRST_WAIT_MS) == WAIT_OBJECT_0;
 }

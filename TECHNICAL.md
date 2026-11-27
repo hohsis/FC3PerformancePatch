@@ -544,8 +544,10 @@ pixels of the right size. The information is in the archives. A mod is installed
   that carries a 12-byte source id. In every pair of the original game (2,259 in Far Cry 3, 1,440 in
   Blood Dragon) the base and its mip0 file have the same id.
 
-At start-up a background thread reads the indexes (35 archives with 490,000 entries take about 30 ms here)
-and looks at every base texture in `patch.fat` that names a mip0 file which only the game's own archives
+A background thread reads the indexes (35 archives with 490,000 entries take about 30 ms here), three
+seconds after the engine was found or at once when the result is first needed: the game starts twice, and
+its first process, which only hands over to the launcher and is gone within a second, has no use for it.
+The thread looks at every base texture in `patch.fat` that names a mip0 file which only the game's own archives
 provide and whose size fits. If the game has a file of the same name, the two bases are compared (size
 and the first 16 KB of content); for a new name the source ids are compared. A base that differs was
 made from another picture, so the mip0 file is recorded by an identity that can be recomputed from what
