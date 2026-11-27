@@ -8,6 +8,7 @@ log never leaks paths, user names or host names.
 
     python run_runtime.py --bin-dir <dir with harness + fixtures> --dll <version.dll>
                           [--work-dir <dir>] [--emulator wine] [--only <scenario>]
+                          [--repeat <n>] [--timeout <seconds>]
 
 SPDX-License-Identifier: GPL-3.0-or-later
 """
@@ -244,11 +245,19 @@ def check_log_privacy(text, work_dir):
             raise Failure("the log leaks private information (matched %r)" % needle)
 
 
-def run(cmd, cwd, env, timeout=180):
+RUN_TIMEOUT = 180
+
+
+def run(cmd, cwd, env, timeout=None):
     try:
-        p = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise Failure("timed out: the host process hung")
+        p = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout or RUN_TIMEOUT)
+    except subprocess.TimeoutExpired as e:
+        # Say how far it got: what the host printed, and the end of the patch's log.
+        said = (e.stdout or b"").decode("utf-8", "replace").strip()
+        log = read_log(cwd) or ""
+        raise Failure("timed out: the host process hung\n--- host output so far ---\n%s\n"
+                      "--- end of the patch log ---\n%s" % (said, "\n".join(log.splitlines()[-25:])))
     return p.returncode, p.stdout.decode("utf-8", "replace")
 
 
@@ -593,6 +602,8 @@ def main():
     ap.add_argument("--work-dir")
     ap.add_argument("--emulator", default="", help="e.g. 'wine' (may include arguments)")
     ap.add_argument("--only", action="append")
+    ap.add_argument("--repeat", type=int, default=1, help="run the chosen scenarios this many times")
+    ap.add_argument("--timeout", type=int, default=0, help="seconds after which a host counts as hung")
     args = ap.parse_args()
     args.bin_dir = os.path.abspath(args.bin_dir)
     args.dll = os.path.abspath(args.dll)
@@ -607,7 +618,10 @@ def main():
         env["WINEDLLOVERRIDES"] = "version=n,b;dxgi=n,b;xinput1_3=n,b;dinput8=n,b"
         env.setdefault("WINEDEBUG", "-all")
 
-    names = args.only or (list(SCENARIOS) + ["laa", "audio"])
+    if args.timeout:
+        global RUN_TIMEOUT
+        RUN_TIMEOUT = args.timeout
+    names = (args.only or (list(SCENARIOS) + ["laa", "audio"])) * max(1, args.repeat)
     failed = 0
     for name in names:
         try:

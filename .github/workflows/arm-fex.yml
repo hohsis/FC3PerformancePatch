@@ -10,6 +10,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      stress_scenario:
+        description: Runtime scenario to run many times after the tests (empty = none)
+        default: ''
+      stress_count:
+        description: How many times
+        default: '40'
 
 permissions:
   contents: read
@@ -55,6 +62,17 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      # For hunting something that only goes wrong now and then under the emulator.
+      - name: Run one scenario many times
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.stress_scenario != '' }}
+        env:
+          SCENARIO: ${{ inputs.stress_scenario }}
+          COUNT: ${{ inputs.stress_count }}
+        run: |
+          python3 tests/runtime/run_runtime.py --bin-dir build/runtime --dll build/version.dll \
+            --work-dir build/stress-work --emulator=wine --only "$SCENARIO" --repeat "$COUNT" --timeout 60 \
+            | grep -v '^\[ OK \]'
 
       - name: Show what the patch saw
         if: always()
