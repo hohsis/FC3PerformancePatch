@@ -550,6 +550,44 @@ static void scenario_fast_cores(const real_machine *m, int max_cores, unsigned f
           fx_glpi_cores(), v);
 }
 
+/* The thread report. Two busy threads for a few seconds: this one, which the
+ * "game" pins to its first processor, and one that nobody places. The patch
+ * looks at the threads once a second here (ThreadReportSeconds) and writes
+ * what it found when the process exits; run_runtime.py reads that. */
+static DWORD WINAPI busy_until(LPVOID tick)
+{
+    volatile unsigned long spin = 0;
+    while ((LONG)(GetTickCount() - (DWORD)(ULONG_PTR)tick) < 0) {
+        ++spin;
+    }
+    return spin ? 0 : 1;
+}
+
+static void scenario_threads(const real_machine *m)
+{
+    DWORD until = GetTickCount() + 2700;
+    HANDLE other = CreateThread(NULL, 0, busy_until, (LPVOID)(ULONG_PTR)until, 0, NULL);
+
+    CHECK(other != NULL, "could not start a second thread");
+    CHECK(fx_set_thread_affinity(1) != 0, "SetThreadAffinityMask(virtual 0) failed");
+    {
+        /* busy, and now and then reading the gamepad as the game's input thread does */
+        unsigned char pad[32];
+        unsigned long spin = 0;
+        while ((LONG)(GetTickCount() - until) < 0) {
+            if ((++spin & 0x3FFF) == 0) {
+                fx_pad_read(0, pad);
+            }
+        }
+    }
+    if (other) {
+        WaitForSingleObject(other, 5000);
+        CloseHandle(other);
+    }
+    SetThreadAffinityMask(GetCurrentThread(), m->process_mask);
+    printf("  two threads were busy for 2.7 s, one of them pinned by the engine\n");
+}
+
 /* Mode=off: nothing about the processor view changes, the loop is still fixed. */
 static void scenario_off(const real_machine *m, int fixed)
 {
@@ -1526,6 +1564,8 @@ int main(int argc, char **argv)
         scenario_virtualized(&machine, max_cores, 0);
     } else if (strcmp(scenario, "process") == 0) {
         scenario_virtualized(&machine, max_cores, 1);
+    } else if (strcmp(scenario, "threads") == 0) {
+        scenario_threads(&machine);
     } else if (strcmp(scenario, "fastcores") == 0) {
         scenario_fast_cores(&machine, max_cores, argc > 3 ? (unsigned)atoi(argv[3]) : 0);
     } else if (strcmp(scenario, "off") == 0) {

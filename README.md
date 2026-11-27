@@ -92,6 +92,7 @@ of versions at launch, pick the DirectX 11 one: the menu does not exist in the D
 | Setting | Default | Meaning |
 |---|---|---|
 | `[CPU] MaxCores` | `6` | Physical cores the game may use; `0` = all |
+| `[Debug] ThreadReport` | `1` | At exit the log lists the game's busiest threads and where they ran; the menu can measure 30 s on request |
 | `[CPU] SpareFastCores` | `auto` | ARM handhelds: this many of the fastest cores get no pinned worker, so the game's main and render threads can have them |
 | `[CPU] UseSMT` | `0` | `1` = use both threads of each core |
 | `[CPU] Mode` | `engine` | `process` also restricts drivers and audio to those cores; `off` leaves the game's own handling |

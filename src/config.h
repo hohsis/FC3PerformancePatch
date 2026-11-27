@@ -70,6 +70,8 @@ typedef struct fc3pp_config {
     int input_without_focus; /* testing aid */
     unsigned long simulate_affinity_mask;
     char host_sys_root[200]; /* testing aid: a folder to read the host's processor files from */
+    int thread_report;          /* which threads use the processor: written to the log at exit */
+    int thread_report_seconds;  /* testing aid: time between two looks at the threads; 0 = 30 */
 
     size_t malformed_lines;
 } fc3pp_config;

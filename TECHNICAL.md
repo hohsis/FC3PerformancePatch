@@ -222,14 +222,29 @@ Proton and Android launchers work this way). Three things matter to this patch t
   after its window appears. An engine request for a processor the process has since lost would fail;
   the patch then places the thread on what is left of the request, or anywhere in the process's set.
 
+- **Seeing what happened on the device** (`[Debug] ThreadReport`, on by default). None of the above can
+  be measured without the device, and from the device only the log comes back. A thread of the patch's
+  own therefore looks at the process's threads every 30 seconds: processor time (`GetThreadTimes`),
+  affinity (`NtQueryInformationThread`) and, once per thread, the module its start address is in. At
+  exit the log lists the busiest threads of the whole session and of its busiest 30 seconds, as a
+  share of one processor, with what is known about each: whether the game pinned it or set it to all
+  processors (recorded by the affinity hook), whether it is the process's first thread, the one that
+  presents the picture or the one that reads the gamepad (recorded by the `Present` and
+  `XInputGetState` hooks, which also count on which processor that thread was each time, so the log
+  says "seen on processor 6 (80 %), 7 (20 %)"). The in-game menu can measure 30 seconds of play on
+  request. Results are kept in two alternating buffers switched with one interlocked write, so the
+  exit path reads a complete one without taking a lock. File names of modules are logged, never
+  their folders.
+
 FEX reports itself through the CPUID hypervisor leaf (`FEXIFEXIEMU`); the log notes it. Status: the whole
 test suite, including the code patches executed as machine code and the hooks inside a host process, passes
 on a GitHub ARM64 runner under Wine 11 with FEX as the 32-bit CPU back end (Hangover's build). That machine
 has four identical cores and no GPU: core ranking is covered by unit tests with the layouts of the
 Snapdragon 8 Gen 2 and 8 Elite, and by a runtime test that points the patch at stand-in processor files
 in which half of the test machine's processors are faster (`[Debug] HostSysRoot`), then checks from
-inside the stand-in engine which real processors it was given; the confinement case by the runtime
-test. **The game itself has not been run on an ARM device.**
+inside the stand-in engine which real processors it was given; the confinement case and the thread
+report (two busy threads, one pinned through the stand-in engine) by runtime tests.
+**The game itself has not been run on an ARM device.**
 
 ## 4. Timing
 

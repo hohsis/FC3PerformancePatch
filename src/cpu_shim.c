@@ -9,6 +9,7 @@
 
 #include "ini.h"
 #include "log.h"
+#include "threads.h"
 #include "pe_image.h"
 
 /* ---- state -------------------------------------------------------------- */
@@ -435,6 +436,7 @@ static DWORD_PTR WINAPI hk_SetThreadAffinityMask(HANDLE thread, DWORD_PTR mask)
     if (!previous) {
         return 0;
     }
+    threads_note_affinity(GetThreadId(thread), real_mask, ((unsigned long)mask & g_vfull) == g_vfull);
     virtual_previous = cpu_r2v_mask(&g_sel, (unsigned long)previous);
     if (!virtual_previous || ((unsigned long)previous & ~g_sel.real_mask)) {
         virtual_previous = g_vfull; /* the thread was not confined to the selection */

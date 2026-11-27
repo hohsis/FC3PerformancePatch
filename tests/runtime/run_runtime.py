@@ -72,6 +72,15 @@ SCENARIOS = {
     # An ARM-style processor: the upper half of the logical processors is faster (setup_host_cpus).
     "fastcores": (HARNESS, ini(max_cores=6) + "HostSysRoot=hostsys\n",
                   ["fastcores", "6", str(FIRST_FAST_CPU)], True, ["Mode=engine", "initialised"], ["ERROR"]),
+    # Which threads were busy, and where the game put them, in the log at exit.
+    "threads": (HARNESS, ini() + "ThreadReportSeconds=1\n", ["threads"], True,
+                ["threads: the busiest stretch of the session (1 s): the process used ",
+                 "threads: the whole session (",
+                 "the process's first thread, reads the input, pinned by the game (0x", "; seen on processor ",
+                 "started in fc3pp_harness.exe, not placed by the game (may run on 0x"],
+                ["ERROR", "an unknown module"]),
+    "threads-off": (HARNESS, ini() + "ThreadReportSeconds=1\nThreadReport=0\n", ["threads"], True,
+                    ["initialised"], ["ERROR", "threads:"]),
     "off": (HARNESS, ini(mode="off"), ["off"], True,
             ["Mode=off", "fixed the processor-enumeration loop"], ["ERROR", "engine sees"]),
     "off-nofix": (HARNESS, ini(mode="off", fix=0), ["off-nofix"], True,

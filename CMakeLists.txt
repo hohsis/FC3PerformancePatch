@@ -61,7 +61,7 @@ target_link_libraries(fc3pp_core PUBLIC fc3pp_options)
 # ---- Win32 layer -----------------------------------------------------------
 add_library(fc3pp_win STATIC
     src/pe_image.c src/log.c src/cpu_shim.c src/laa.c src/vtable.c src/display.c src/audio.c
-    src/texguard.c src/texlink.c src/tex_stale.c src/overlay.c src/menu.c src/padswitch.c src/gfx_profile.c)
+    src/texguard.c src/texlink.c src/tex_stale.c src/overlay.c src/menu.c src/padswitch.c src/gfx_profile.c src/threads.c)
 target_link_libraries(fc3pp_win PUBLIC fc3pp_core user32 gdi32)
 
 # ---- the proxy DLL -----------------------------------------------------------

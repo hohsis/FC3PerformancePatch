@@ -23,6 +23,7 @@ void config_defaults(fc3pp_config *cfg)
     cfg->prefer_performance_cores = 1;
     cfg->skip_core0 = 0;
     cfg->spare_fast_cores = CPU_SPARE_AUTO;
+    cfg->thread_report = 1;
     cfg->timer_resolution_ms = 1;
     cfg->sleep_zero_yield = 0;
     cfg->apply_large_address_aware = 1;
@@ -192,6 +193,9 @@ int config_load_text(fc3pp_config *cfg, const char *text, size_t len)
     cfg->input_without_focus = ini_get_bool(&doc, "Debug", "InputWithoutFocus", cfg->input_without_focus);
     cfg->simulate_affinity_mask =
         ini_get_uint(&doc, "Debug", "SimulateAffinityMask", cfg->simulate_affinity_mask) & 0xFFFFFFFFul;
+    cfg->thread_report = ini_get_bool(&doc, "Debug", "ThreadReport", cfg->thread_report);
+    cfg->thread_report_seconds =
+        (int)ini_get_int_clamped(&doc, "Debug", "ThreadReportSeconds", cfg->thread_report_seconds, 0, 600);
     {
         const char *root = ini_get(&doc, "Debug", "HostSysRoot");
         if (root && strlen(root) < sizeof(cfg->host_sys_root)) {

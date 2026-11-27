@@ -28,6 +28,7 @@
 #include "padswitch.h"
 #include "pe_image.h"
 #include "texguard.h"
+#include "threads.h"
 #include "vtable.h"
 
 /* ---- entries --------------------------------------------------------------------- */
@@ -52,6 +53,8 @@ enum {
     ID_AUTO_SWITCH,
     ID_DRAW_DISTANCE,
     ID_MENU_SCALE,
+    ID_MEASURE,
+    ID_STATUS_MEASURE,
     ID_CLOSE
 };
 
@@ -113,6 +116,12 @@ static mm_item g_items[] = {
     {MM_CHOICE, ID_MENU_SCALE, "Size",
      "Larger text for a handheld or a television across the room. Works at once.", 0, 0, SCALE_STEPS - 1, 1,
      SCALE_NAMES, SCALE_STEPS, 0, "", 0},
+    HEADING("Diagnostics"),
+    {MM_ACTION, ID_MEASURE, "Measure processor use for 30 s",
+     "Start it, close the menu and keep playing. After 30 seconds the log lists the busiest threads "
+     "and the processors they ran on.",
+     0, 0, 0, 0, NULL, 0, 0, "", 0},
+    INFO(ID_STATUS_MEASURE, "Measurement"),
     HEADING(""),
     {MM_ACTION, ID_CLOSE, "Close", "", 0, 0, 0, 0, NULL, 0, 0, "", 0},
 };
@@ -350,6 +359,8 @@ static unsigned gamepad_buttons(void)
 static DWORD WINAPI hook_xinput_get_state(DWORD index, xi_state *state)
 {
     DWORD result = g_xi_real ? g_xi_real(index, state) : ERROR_DEVICE_NOT_CONNECTED;
+
+    threads_note_here(THREADS_AT_INPUT);
 
     if (result == ERROR_SUCCESS && state) {
         if (g_open || g_hold_gamepad) {
@@ -615,6 +626,8 @@ static int game_has_focus(void)
     return fg && GetWindowThreadProcessId(fg, &pid) && pid == GetCurrentProcessId();
 }
 
+static int g_measured; /* a measurement was started from the menu */
+
 static void update_status(void)
 {
     long added = 0, left_out = 0;
@@ -625,6 +638,15 @@ static void update_status(void)
             snprintf(it->text, sizeof(it->text), "%ld of %ld", left_out, added + left_out);
         } else {
             snprintf(it->text, sizeof(it->text), "guard not active");
+        }
+    }
+    it = mm_find(&g_menu, ID_STATUS_MEASURE);
+    if (it) {
+        unsigned left = threads_measuring();
+        if (left) {
+            snprintf(it->text, sizeof(it->text), "running, %u s left", left);
+        } else {
+            snprintf(it->text, sizeof(it->text), "%s", g_measured ? "written to the log" : "not started");
         }
     }
     it = mm_find(&g_menu, ID_STATUS_DISTANCE);
@@ -656,6 +678,7 @@ void menu_on_present(void *swap_chain)
     float w = 0, h = 0;
     md_list list;
 
+    threads_note_here(THREADS_AT_PRESENT);
     if (!g_enabled) {
         return;
     }
@@ -715,6 +738,11 @@ void menu_on_present(void *swap_chain)
             changed = mm_handle(&g_menu, input);
             if (changed == ID_CLOSE) {
                 mm_open(&g_menu, 0);
+            } else if (changed == ID_MEASURE) {
+                if (threads_measure(30)) {
+                    g_measured = 1;
+                    LOGI("menu: measuring the game's threads for 30 s");
+                }
             } else if (changed != MM_NO_CHANGE) {
                 save(changed);
             }

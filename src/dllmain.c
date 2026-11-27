@@ -30,6 +30,7 @@
 #include "tex_stale.h"
 #include "texguard.h"
 #include "texlink.h"
+#include "threads.h"
 
 #define MAX_TRACKED_MODULES 8
 #define MAX_INI_SIZE (1u << 20)
@@ -490,6 +491,7 @@ static void fc3pp_init(HINSTANCE self)
              "using L3+R3");
     }
     menu_init(&g_cfg, ini_path);
+    threads_start(g_cfg.thread_report, (unsigned)g_cfg.thread_report_seconds);
     apply_laa(host);
     apply_timer_resolution();
     /* user32 is a static import of this DLL, hence already initialised. */
@@ -528,6 +530,7 @@ static void fc3pp_shutdown(int process_terminating)
         texlink_log_stats();
         padswitch_log_stats();
         gfx_profile_log_stats();
+        threads_log_stats();
         LOGI("process exit");
         return;
     }
@@ -541,6 +544,7 @@ static void fc3pp_shutdown(int process_terminating)
     texlink_log_stats();
     padswitch_log_stats();
     gfx_profile_log_stats();
+    threads_log_stats();
     LOGI("unloaded");
     log_shutdown();
     proxy_shutdown();
