@@ -222,6 +222,18 @@ Proton and Android launchers work this way). Three things matter to this patch t
   after its window appears. An engine request for a processor the process has since lost would fail;
   the patch then places the thread on what is left of the request, or anywhere in the process's set.
 
+- **No thread of the patch finishes as a process ends.** Found by the ARM test run itself: one scenario
+  timed out once. Run 60 times on the ARM machine it hung twice, and each time the test program had
+  completed its checks and printed its summary, while the patch's log ended with the archive scan's
+  result, 1 ms earlier, and without the lines the patch writes when the process exits. The process
+  had hung while ending, in the moment its scan thread finished. A comparison run settled it: with
+  the test program waiting 200 ms before it ends, 0 hangs in 150 runs; without, 5 in 150. (Windows
+  itself, and Wine on x86, never showed this in any run.) The game is exposed to exactly this: it
+  starts twice, and its first process is gone within a second, which is when the scan used to
+  finish. The scan therefore no longer runs in a process that young (section 9), and the patch's
+  other thread spends its time waiting, which is harmless: such a thread existed in all 150 clean
+  runs. What ends the process cleanly in the real game is not the patch's to decide; the game's own
+  130 threads are subject to the same race.
 - **Seeing what happened on the device** (`[Debug] ThreadReport`, on by default). None of the above can
   be measured without the device, and from the device only the log comes back. A thread of the patch's
   own therefore looks at the process's threads every 30 seconds: processor time (`GetThreadTimes`),
@@ -544,9 +556,10 @@ pixels of the right size. The information is in the archives. A mod is installed
   that carries a 12-byte source id. In every pair of the original game (2,259 in Far Cry 3, 1,440 in
   Blood Dragon) the base and its mip0 file have the same id.
 
-A background thread reads the indexes (35 archives with 490,000 entries take about 30 ms here), three
+A background thread reads the indexes (35 archives with 490,000 entries take about 30 ms here), ten
 seconds after the engine was found or at once when the result is first needed: the game starts twice, and
-its first process, which only hands over to the launcher and is gone within a second, has no use for it.
+its first process, which only hands over to the launcher and is gone within a second, has no use for it
+(and see section 3 for what can happen under an emulator when a process ends just as a thread does).
 The thread looks at every base texture in `patch.fat` that names a mip0 file which only the game's own archives
 provide and whose size fits. If the game has a file of the same name, the two bases are compared (size
 and the first 16 KB of content); for a new name the source ids are compared. A base that differs was

@@ -16,10 +16,14 @@
 #define FIRST_WAIT_MS 5000
 /* The scan starts this long after the engine was found, or at once when its
  * result is first asked for. The game starts twice: the first process only
- * hands over to the launcher and is gone within a second, and it should not
- * read forty archive indexes for nothing - nor be ended, as every process is
- * in the end, while a thread of the patch is in the middle of its work. */
-#define START_DELAY_MS 3000
+ * hands over to the launcher and is gone within a second (longer under an
+ * emulator), and it should not read forty archive indexes for nothing. More
+ * than that: under Wine with the FEX emulator a process that ends in the
+ * moment in which one of its threads finishes hangs now and then (measured:
+ * 5 of 150 runs of a test whose scan ended 1 ms before the process, none of
+ * 150 with 200 ms in between). A thread that is still waiting is no such
+ * risk. */
+#define START_DELAY_MS 10000
 #define PATH_CHARS (MAX_PATH * 2)
 
 typedef struct archive {

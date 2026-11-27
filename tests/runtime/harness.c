@@ -1620,8 +1620,8 @@ int main(int argc, char **argv)
     } else if (strcmp(scenario, "shared-tops-off") == 0) {
         scenario_shared_tops(0);
         /* Nothing asks for the archive scan's result here, so it starts on its
-         * own after three seconds; its warning is what this scenario is about. */
-        Sleep(3600);
+         * own after ten seconds; its warning is what this scenario is about. */
+        Sleep(10600);
     } else if (strcmp(scenario, "textures") == 0) {
         scenario_textures(1, 1);
     } else if (strcmp(scenario, "textures-noscan") == 0) {
