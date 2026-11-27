@@ -60,4 +60,9 @@ jobs:
         if: always()
         run: |
           log=$(find build/runtime-work/engine -name 'FC3PerformancePatch.log' | head -n 1)
-          if [ -n "$log" ]; then head -n 12 "$log"; fi
+          if [ -n "$log" ]; then head -n 14 "$log"; fi
+          # the processor with faster and slower cores, and the thread report
+          for scenario in fastcores threads; do
+            log=$(find "build/runtime-work/$scenario" -name 'FC3PerformancePatch.log' | head -n 1)
+            if [ -n "$log" ]; then echo "--- $scenario"; grep -E 'cpu:|threads:' "$log" | head -n 16; fi
+          done

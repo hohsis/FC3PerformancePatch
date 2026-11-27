@@ -151,8 +151,8 @@ static unsigned long read_host_number(const char *unix_path)
 static void rank_cores_from_host(cpu_topology *topo)
 {
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    unsigned long capacity[FC3PP_MAX_CPUS];
-    unsigned i, classes;
+    unsigned long capacity[FC3PP_MAX_CPUS], lowest = 0, highest = 0;
+    unsigned i, classes, read = 0;
 
     if (!g_host_root[0] && (!ntdll || !GetProcAddress(ntdll, "wine_get_version"))) {
         return; /* Windows reports the classes itself */
@@ -164,10 +164,18 @@ static void rank_cores_from_host(cpu_topology *topo)
             snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%u/cpu_capacity", i);
             capacity[i] = read_host_number(path);
             if (!capacity[i]) {
-                return; /* not an ARM host, or the host's files are out of reach */
+                /* not an ARM host, or the host's files are out of reach */
+                LOGD("cpu: the host publishes no capacity for processor %u (not an ARM system, or its files "
+                     "cannot be read from here); the cores are taken as the system reports them",
+                     i);
+                return;
             }
+            lowest = !read || capacity[i] < lowest ? capacity[i] : lowest;
+            highest = capacity[i] > highest ? capacity[i] : highest;
+            ++read;
         }
     }
+    LOGD("cpu: the host's capacity was read for %u processors (lowest %lu, highest %lu)", read, lowest, highest);
     classes = cpu_topology_rank_by_capacity(topo, capacity);
     if (classes) {
         LOGI("cpu: the host reports cores of %u different speeds (cpu_capacity); faster cores are preferred", classes);
