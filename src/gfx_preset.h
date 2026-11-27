@@ -16,8 +16,9 @@
  * file, which is why the tweak never sticks.
  *
  * A preset takes the installed defaults (so it scales whatever a mod has put
- * there), multiplies the distance values, and adds the resulting sections to
- * the profile text the game is about to parse.
+ * there), multiplies the distance values (up for the "far" presets, down for
+ * the "near" ones), and adds the resulting sections to the profile text the
+ * game is about to parse.
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef FC3PP_GFX_PRESET_H
@@ -25,9 +26,19 @@
 
 #include <stddef.h>
 
-typedef enum gp_level { GP_ORIGINAL = 0, GP_FAR = 1, GP_VERY_FAR = 2 } gp_level;
+/* The numbers of the first three are what the INI file has always held. The
+ * two "near" levels do the opposite of the "far" ones, for devices on which
+ * the game's own processor work is the limit: less is drawn. */
+typedef enum gp_level { GP_ORIGINAL = 0, GP_FAR = 1, GP_VERY_FAR = 2, GP_NEAR = 3, GP_VERY_NEAR = 4 } gp_level;
 
-#define GP_LEVELS 3
+#define GP_LEVELS 5
+
+/* The levels in the order a person thinks of them: -2 very near, -1 near,
+ * 0 original, 1 far, 2 very far. This is also what the INI file holds. */
+int gp_level_to_step(gp_level level);
+/* Returns 0 and leaves *level alone when step is not one of the five. */
+int gp_level_from_step(int step, gp_level *level);
+const char *gp_level_name(gp_level level);
 #define GP_OVERLAY_SLACK 64u
 
 /* Text of profile with the preset's sections added to its <RenderProfile>.

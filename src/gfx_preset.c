@@ -19,18 +19,48 @@ typedef struct scale_rule {
     float factor[GP_LEVELS]; /* indexed by gp_level */
 } scale_rule;
 
+/* A factor of 1 means: this preset leaves the value alone (the text is not
+ * even rewritten). The "near" presets also thin out the vegetation clusters
+ * (ClustersLodScale), which the "far" ones do not touch. */
 static const scale_rule RULES[] = {
-    {"Geometry", "LodScale", {1.0f, 0.7f, 0.5f}},
-    {"Geometry", "KillLodScale", {1.0f, 0.7f, 0.5f}},
-    {"Geometry", "RealTreesLodScale", {1.0f, 0.7f, 0.5f}},
-    {"Geometry", "RealTreesVistaMinViewDistanceScale", {1.0f, 0.7f, 0.5f}},
-    {"Shadow", "SunShadowRange0", {1.0f, 1.5f, 2.0f}},
-    {"Shadow", "SunShadowRange1", {1.0f, 1.5f, 2.0f}},
-    {"Shadow", "SunShadowRange2", {1.0f, 1.5f, 2.0f}},
-    {"Terrain", "TerrainLodScale", {1.0f, 0.7f, 0.5f}},
-    {"Terrain", "TerrainDetailViewDistance", {1.0f, 1.5f, 2.0f}},
-    {"Terrain", "TerrainDetailBlendViewDistance", {1.0f, 1.5f, 2.0f}},
+    /*                                                    original far   v.far  near  v.near */
+    {"Geometry", "LodScale", {1.0f, 0.7f, 0.5f, 1.5f, 2.0f}},
+    {"Geometry", "KillLodScale", {1.0f, 0.7f, 0.5f, 1.5f, 2.0f}},
+    {"Geometry", "ClustersLodScale", {1.0f, 1.0f, 1.0f, 1.5f, 2.0f}},
+    {"Geometry", "RealTreesLodScale", {1.0f, 0.7f, 0.5f, 1.5f, 2.0f}},
+    {"Geometry", "RealTreesVistaMinViewDistanceScale", {1.0f, 0.7f, 0.5f, 1.5f, 2.0f}},
+    {"Shadow", "SunShadowRange0", {1.0f, 1.5f, 2.0f, 0.7f, 0.5f}},
+    {"Shadow", "SunShadowRange1", {1.0f, 1.5f, 2.0f, 0.7f, 0.5f}},
+    {"Shadow", "SunShadowRange2", {1.0f, 1.5f, 2.0f, 0.7f, 0.5f}},
+    {"Terrain", "TerrainLodScale", {1.0f, 0.7f, 0.5f, 1.5f, 2.0f}},
+    {"Terrain", "TerrainDetailViewDistance", {1.0f, 1.5f, 2.0f, 0.7f, 0.5f}},
+    {"Terrain", "TerrainDetailBlendViewDistance", {1.0f, 1.5f, 2.0f, 0.7f, 0.5f}},
 };
+
+static const int STEP_OF_LEVEL[GP_LEVELS] = {0, 1, 2, -1, -2};
+
+int gp_level_to_step(gp_level level)
+{
+    return (int)level >= 0 && level < GP_LEVELS ? STEP_OF_LEVEL[level] : 0;
+}
+
+int gp_level_from_step(int step, gp_level *level)
+{
+    int i;
+    for (i = 0; i < GP_LEVELS; ++i) {
+        if (STEP_OF_LEVEL[i] == step) {
+            *level = (gp_level)i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+const char *gp_level_name(gp_level level)
+{
+    static const char *const names[GP_LEVELS] = {"Original", "Far", "Very far", "Near", "Very near"};
+    return (int)level >= 0 && level < GP_LEVELS ? names[level] : names[GP_ORIGINAL];
+}
 
 static const char *const SECTIONS[] = {"Geometry", "Shadow", "Terrain"};
 
@@ -76,15 +106,16 @@ static const char *element(const char *text, size_t len, const char *name, size_
     return start;
 }
 
-/* Does the attribute `name="` start at p (which follows white space)? */
-static const scale_rule *rule_at(const char *p, size_t left, const char *section)
+/* Does an attribute `name="` that this preset changes start at p (which
+ * follows white space)? */
+static const scale_rule *rule_at(const char *p, size_t left, const char *section, gp_level level)
 {
     size_t r;
     for (r = 0; r < sizeof(RULES) / sizeof(RULES[0]); ++r) {
         size_t n = strlen(RULES[r].attribute);
         if (strcmp(RULES[r].section, section) == 0 && left > n + 2 && memcmp(p, RULES[r].attribute, n) == 0 &&
             p[n] == '=' && p[n + 1] == '"') {
-            return &RULES[r];
+            return RULES[r].factor[level] != 1.0f ? &RULES[r] : NULL;
         }
     }
     return NULL;
@@ -108,7 +139,8 @@ long gp_scaled_section(const char *cfg, size_t cfg_len, const char *section, gp_
         return -1;
     }
     while (i < len) {
-        const scale_rule *rule = (i > 0 && is_space(src[i - 1])) ? rule_at(src + i, len - i, section) : NULL;
+        const scale_rule *rule =
+            (i > 0 && is_space(src[i - 1])) ? rule_at(src + i, len - i, section, level) : NULL;
         if (rule) {
             size_t name_len = strlen(rule->attribute) + 2; /* name=" */
             size_t v = i + name_len, e = v;

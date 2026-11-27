@@ -3,6 +3,7 @@
  */
 #include "config.h"
 #include "cpu_topology.h"
+#include "gfx_preset.h"
 #include "ini.h"
 #include "test.h"
 
@@ -226,6 +227,9 @@ static void test_config_bad_values(void)
     static const char spare_many[] = "[CPU]\nSpareFastCores=99\n";
     static const char spare_auto[] = "[CPU]\nSpareFastCores=Auto\n";
     static const char far_name[] = "[Graphics]\nDrawDistance=Far\n";
+    static const char near_number[] = "[Graphics]\nDrawDistance=-1\n";
+    static const char very_near[] = "[Graphics]\nDrawDistance=Very near\n";
+    static const char too_near[] = "[Graphics]\nDrawDistance=-3\n";
     static const char very_far[] = "[Graphics]\nDrawDistance=VeryFar\n";
     static const char original[] = "[Graphics]\nDrawDistance=original\n";
     fc3pp_config c;
@@ -244,6 +248,11 @@ static void test_config_bad_values(void)
     CHECK(config_load_text(&c, spare_many, sizeof(spare_many) - 1) == 0 && c.spare_fast_cores == CPU_SPARE_MAX);
     CHECK(config_load_text(&c, spare_auto, sizeof(spare_auto) - 1) == 0 && c.spare_fast_cores == CPU_SPARE_AUTO);
     CHECK(config_load_text(&c, far_name, sizeof(far_name) - 1) == 0 && c.draw_distance == 1);
+    CHECK(config_load_text(&c, near_number, sizeof(near_number) - 1) == 0 && c.draw_distance == GP_NEAR &&
+          c.draw_distance_invalid == 0);
+    CHECK(config_load_text(&c, very_near, sizeof(very_near) - 1) == 0 && c.draw_distance == GP_VERY_NEAR);
+    CHECK(config_load_text(&c, too_near, sizeof(too_near) - 1) == 0 && c.draw_distance == GP_ORIGINAL &&
+          c.draw_distance_invalid == 1);
     CHECK(config_load_text(&c, very_far, sizeof(very_far) - 1) == 0 && c.draw_distance == 2);
     CHECK(config_load_text(&c, original, sizeof(original) - 1) == 0 && c.draw_distance == 0 &&
           c.draw_distance_invalid == 0);

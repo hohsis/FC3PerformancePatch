@@ -29,6 +29,7 @@ the in-game menu or the INI file:
 |---|---|
 | **Gamepad or keyboard by use** | The game switches between gamepad mode and keyboard/mouse mode according to what you touch, instead of staying in the mode set in its options |
 | **Draw distance** (*Far*, *Very far*) | Detailed models, trees, terrain and sun shadows are kept up to further away. Costs frame rate. `GamerProfile.xml` is not changed |
+| **Draw distance** (*Near*, *Very near*) | The opposite, for slow devices: less is drawn, below what the game's own lowest settings allow |
 
 How each problem was found and how the fix works is in [TECHNICAL.md](TECHNICAL.md).
 
@@ -101,7 +102,7 @@ of versions at launch, pick the DirectX 11 one: the menu does not exist in the D
 | `[Textures] SkipReplacedTextureMip0` | `1` | Keeps the game's original close-up texture from showing through a mod's replacement |
 | `[Textures] SkipSharedMip0` | `1` | Does not load close-up texture files that several textures share (crash after long play with some mods) |
 | `[Controls] AutoSwitchInput` | `0` | `1` = gamepad or keyboard/mouse mode follows what you use |
-| `[Graphics] DrawDistance` | `0` | `1` = far, `2` = very far. Read when the game starts |
+| `[Graphics] DrawDistance` | `0` | `1` = far, `2` = very far; `-1` = near, `-2` = very near. Read when the game starts |
 | `[Menu] Key` | `F8` | The key that opens the in-game menu; `[Menu] Enabled=0` removes the menu |
 | `[Menu] PadButtons` | `L3+R3` | Gamepad buttons that open the menu when held together; `None` = keyboard only |
 | `[Menu] Scale` | `100` | Size of the menu in percent, up to `200` |
@@ -161,6 +162,9 @@ Not verified:
 - **Draw distance** on screen: the game takes the values (see above), but how the result looks and
   what it costs in frame rate was not judged in play; *Far* was not started in the game (same code,
   other factors). Off by default because it costs frame rate.
+- **Draw distance *Near* and *Very near***: not started in the game at all yet. Same mechanism as
+  *Very far*, so the values will reach the game, but whether it gains frame rate, how much, and
+  how it looks is unknown.
 - The texture guard with Blood Dragon or with the DX9 executable (not supported there).
 - `SkipSharedMip0` in play: the crash it addresses came after 2 h 45 min, so its absence cannot be
   confirmed quickly. Not available for Blood Dragon (its code is not recognised yet).

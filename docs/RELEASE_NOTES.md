@@ -35,7 +35,8 @@ default to on, the two extras to off. Copy the new INI too if you want them list
     shadows up to further away, at a cost in frame rate. `GamerProfile.xml` is not changed. The game
     reads these values once when it starts, so a change needs a restart; the menu shows which
     value is in use. Confirmed to reach the game (Far Cry 3, DX11); the look and the cost are for
-    you to judge.
+    you to judge. `-1` and `-2` (*Near*, *Very near*) go the other way for slow devices: less is
+    drawn than the game's lowest settings allow. Those two have not been tried in the game yet.
 - **ARM handhelds (Wine with FEX).** Fast and slow cores are told apart there (Wine does not report
   them), and the patch copes with launchers that move the game to other processors after it has
   started. The test suite passes under FEX; the game itself has not been tried on such a device yet.

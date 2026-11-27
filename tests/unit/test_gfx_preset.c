@@ -106,6 +106,53 @@ static void test_section(void)
     CHECK(gp_scaled_section(NULL, 0, "Geometry", GP_FAR, g_out, sizeof(g_out), NULL) == -1);
 }
 
+/* The presets for slow devices: the same values the other way, and the
+ * vegetation clusters as well. */
+static void test_near(void)
+{
+    unsigned values = 0, sections = 0;
+    gp_level level = GP_ORIGINAL;
+    long n = gp_scaled_section(CONFIG, sizeof(CONFIG) - 1, "Geometry", GP_NEAR, g_out, sizeof(g_out), &values);
+
+    CHECK(n > 0);
+    CHECK_EQ_U(values, 10); /* five values in each of the two quality levels */
+    CHECK(has(g_out, n, "id=\"low\" LodScale=\"2.25\" KillLodScale=\"3\" ClustersLodScale=\"1.875\" "
+                        "RealTreesLodScale=\"1.5\" RealTreesVistaMinViewDistanceScale=\"1.5\""));
+    CHECK(has(g_out, n, "id=\"ultrahigh\" LodScale=\"0.75\" KillLodScale=\"0.75\" ClustersLodScale=\"0.75\""));
+    CHECK(has(g_out, n, "MaxGeomBatches=\"64\" />"));
+    n = gp_scaled_section(CONFIG, sizeof(CONFIG) - 1, "Geometry", GP_VERY_NEAR, g_out, sizeof(g_out), NULL);
+    CHECK(has(g_out, n, "id=\"ultrahigh\" LodScale=\"1\" KillLodScale=\"1\" ClustersLodScale=\"1\""));
+
+    n = gp_scaled_section(CONFIG, sizeof(CONFIG) - 1, "Shadow", GP_NEAR, g_out, sizeof(g_out), &values);
+    CHECK_EQ_U(values, 3);
+    CHECK(has(g_out, n, "SunShadowFadeRange=\"10\" SunShadowRange0=\"2.1\" SunShadowRange1=\"8.4\" "
+                        "SunShadowRange2=\"42\""));
+    n = gp_scaled_section(CONFIG, sizeof(CONFIG) - 1, "Shadow", GP_VERY_NEAR, g_out, sizeof(g_out), NULL);
+    CHECK(has(g_out, n, "SunShadowRange0=\"1.5\" SunShadowRange1=\"6\" SunShadowRange2=\"30\""));
+    n = gp_scaled_section(CONFIG, sizeof(CONFIG) - 1, "Terrain", GP_VERY_NEAR, g_out, sizeof(g_out), &values);
+    CHECK_EQ_U(values, 3);
+    CHECK(has(g_out, n, "TerrainLodScale=\"2\" TerrainDetailViewDistance=\"256\" "
+                        "TerrainDetailBlendViewDistance=\"32\""));
+
+    n = gp_overlay(PROFILE, sizeof(PROFILE) - 1, CONFIG, sizeof(CONFIG) - 1, GP_VERY_NEAR, g_out, sizeof(g_out),
+                   &sections);
+    CHECK(n > 0);
+    CHECK_EQ_U(sections, 3);
+    CHECK(has(g_out, n, "SunShadowRange2=\"30\"") && has(g_out, n, "</RenderProfile>"));
+
+    /* the numbers of the INI file and the names */
+    CHECK(gp_level_to_step(GP_VERY_NEAR) == -2 && gp_level_to_step(GP_NEAR) == -1);
+    CHECK(gp_level_to_step(GP_ORIGINAL) == 0 && gp_level_to_step(GP_FAR) == 1 && gp_level_to_step(GP_VERY_FAR) == 2);
+    CHECK(gp_level_to_step((gp_level)9) == 0);
+    CHECK(gp_level_from_step(-2, &level) && level == GP_VERY_NEAR);
+    CHECK(gp_level_from_step(2, &level) && level == GP_VERY_FAR);
+    CHECK(gp_level_from_step(0, &level) && level == GP_ORIGINAL);
+    CHECK(!gp_level_from_step(3, &level) && level == GP_ORIGINAL);
+    CHECK_STR(gp_level_name(GP_VERY_NEAR), "Very near");
+    CHECK_STR(gp_level_name(GP_FAR), "Far");
+    CHECK_STR(gp_level_name((gp_level)9), "Original");
+}
+
 static void test_unknown_values(void)
 {
     static const char odd[] = "<Geometry><quality id=\"x\" LodScale=\"auto\" /></Geometry>";
@@ -213,6 +260,7 @@ static void test_overlay_odd_profiles(void)
 void suite_gfx_preset(void)
 {
     RUN(test_section);
+    RUN(test_near);
     RUN(test_unknown_values);
     RUN(test_overlay);
     RUN(test_overlay_respects_the_player);

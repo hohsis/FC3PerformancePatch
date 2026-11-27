@@ -57,7 +57,7 @@ typedef struct fc3pp_config {
     int auto_switch_input; /* gamepad or keyboard/mouse mode follows what is used */
 
     /* [Graphics] */
-    int draw_distance;         /* a gp_level: 0 original, 1 far, 2 very far */
+    int draw_distance;         /* a gp_level (in the INI file: -2 very near ... 2 very far) */
     int draw_distance_invalid; /* the DrawDistance= value was not understood */
 
     /* [Audio] */

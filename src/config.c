@@ -54,7 +54,7 @@ const char *config_mode_name(cpu_mode mode)
     }
 }
 
-/* 0/1/2 or the names shown in the menu. Returns -1 when not understood. */
+/* -2 to 2 or the names shown in the menu. Returns a gp_level, or -1 when not understood. */
 static int parse_distance(const char *s)
 {
     if (ini_streq_nocase(s, "0") || ini_streq_nocase(s, "original") || ini_streq_nocase(s, "off")) {
@@ -65,6 +65,12 @@ static int parse_distance(const char *s)
     }
     if (ini_streq_nocase(s, "2") || ini_streq_nocase(s, "veryfar") || ini_streq_nocase(s, "very far")) {
         return GP_VERY_FAR;
+    }
+    if (ini_streq_nocase(s, "-1") || ini_streq_nocase(s, "near")) {
+        return GP_NEAR;
+    }
+    if (ini_streq_nocase(s, "-2") || ini_streq_nocase(s, "verynear") || ini_streq_nocase(s, "very near")) {
+        return GP_VERY_NEAR;
     }
     return -1;
 }

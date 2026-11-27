@@ -60,7 +60,8 @@ enum {
 
 static const char *const MODE_NAMES[] = {"off", "engine", "process"};
 static const char *const SPARE_NAMES[] = {"Auto", "0", "1", "2", "3", "4"};
-static const char *const DISTANCE_NAMES[] = {"Original", "Far", "Very far"};
+/* in the order of the choice in the menu: gp_level_to_step() + 2 */
+static const char *const DISTANCE_NAMES[] = {"Very near", "Near", "Original", "Far", "Very far"};
 static const char *const SCALE_NAMES[] = {"100 %", "125 %", "150 %", "175 %", "200 %"};
 #define SCALE_STEPS 5
 
@@ -94,9 +95,9 @@ static mm_item g_items[] = {
            "Return to fullscreen when you switch back to the game, instead of staying in a window."),
     TOGGLE(ID_DPI_AWARE, "DPI aware", "Stops Windows from scaling the game's window on displays set above 100 %."),
     {MM_CHOICE, ID_DRAW_DISTANCE, "Draw distance",
-     "Shows detailed models, trees, terrain and sun shadows further away. Costs frame rate, 'Very far' a lot. "
-     "Read once when the game starts: you will not see it change here.",
-     0, 0, GP_LEVELS - 1, 1, DISTANCE_NAMES, GP_LEVELS, MM_RESTART, "", 0},
+     "Far: detailed models, trees, terrain and sun shadows further away, at a cost in frame rate. Near: the "
+     "opposite, for slow devices. Read once when the game starts: you will not see it change here.",
+     2, 0, GP_LEVELS - 1, 1, DISTANCE_NAMES, GP_LEVELS, MM_RESTART, "", 0},
     HEADING("Controls"),
     {MM_TOGGLE, ID_AUTO_SWITCH, "Gamepad or keyboard by use",
      "The game follows whichever you touch: gamepad, or keyboard and mouse. Works at once, no restart.", 0, 0, 1, 1,
@@ -195,7 +196,7 @@ void menu_init(const fc3pp_config *cfg, const wchar_t *ini_path)
     set_value(ID_TEX_SHARED, cfg->texture_shared);
     set_value(ID_KEEP_XAUDIO, cfg->keep_xaudio2_loaded);
     set_value(ID_AUTO_SWITCH, cfg->auto_switch_input);
-    set_value(ID_DRAW_DISTANCE, cfg->draw_distance);
+    set_value(ID_DRAW_DISTANCE, gp_level_to_step((gp_level)cfg->draw_distance) + 2);
     g_auto_switch = cfg->auto_switch_input;
     g_combo = cfg->menu_pad & 0xFFFFu;
     g_assume_focus = cfg->input_without_focus;
@@ -281,6 +282,7 @@ static void save(int id)
         break;
     case ID_DRAW_DISTANCE:
         section = L"Graphics", key = L"DrawDistance";
+        _snwprintf(value, 32, L"%d", it->value - 2);
         break;
     case ID_MENU_SCALE:
         section = L"Menu", key = L"Scale";
@@ -653,7 +655,7 @@ static void update_status(void)
     if (it) {
         int level = GP_ORIGINAL;
         gfx_profile_result result = gfx_profile_state(&level);
-        const char *name = DISTANCE_NAMES[level > GP_ORIGINAL && level < GP_LEVELS ? level : GP_ORIGINAL];
+        const char *name = gp_level_name((gp_level)level);
 
         snprintf(it->text, sizeof(it->text), "%s%s", name,
                  result == GFX_PROFILE_FAILED    ? ": not applied, see the log"

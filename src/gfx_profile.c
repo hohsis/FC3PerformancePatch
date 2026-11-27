@@ -46,7 +46,7 @@ static unsigned long g_copies; /* numbers the temporary files */
 
 static const char *level_name(int level)
 {
-    return level == GP_VERY_FAR ? "Very far" : "Far";
+    return gp_level_name((gp_level)level);
 }
 
 static int is_profile_w(const wchar_t *path)
@@ -241,9 +241,9 @@ static void report(int result)
     if (result > 0) {
         InterlockedIncrement(&g_applied);
         if (InterlockedExchange(&g_logged, 1) == 0) {
-            LOGI("graphics: draw distance '%s': %d sections with longer distances added to the profile as the game "
+            LOGI("graphics: draw distance '%s': %d sections with %s distances added to the profile as the game "
                  "reads it (the file on disk is not changed)",
-                 level_name(g_level), result);
+                 level_name(g_level), result, gp_level_to_step((gp_level)g_level) < 0 ? "shorter" : "longer");
         }
     } else if (result != OV_NO_PROFILE && InterlockedIncrement(&g_failed) == 1) {
         if (result == OV_NOTHING_TO_ADD) {

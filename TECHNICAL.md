@@ -740,12 +740,22 @@ configuration from the archives (`patch.fat` first, so a mod's values are the st
 `common.fat`), and copies the three sections above into the profile text with these values
 multiplied:
 
-| Section | Values | Far | Very far |
-|---|---|---|---|
-| Geometry | `LodScale`, `KillLodScale`, `RealTreesLodScale`, `RealTreesVistaMinViewDistanceScale` | x0.7 | x0.5 |
-| Shadow | `SunShadowRange0`, `1`, `2` (the far ends of the three sun shadow cascades) | x1.5 | x2 |
-| Terrain | `TerrainLodScale` | x0.7 | x0.5 |
-| Terrain | `TerrainDetailViewDistance`, `TerrainDetailBlendViewDistance` | x1.5 | x2 |
+| Section | Values | Far | Very far | Near | Very near |
+|---|---|---|---|---|---|
+| Geometry | `LodScale`, `KillLodScale`, `RealTreesLodScale`, `RealTreesVistaMinViewDistanceScale` | x0.7 | x0.5 | x1.5 | x2 |
+| Geometry | `ClustersLodScale` (vegetation clusters) | - | - | x1.5 | x2 |
+| Shadow | `SunShadowRange0`, `1`, `2` (the far ends of the three sun shadow cascades) | x1.5 | x2 | x0.7 | x0.5 |
+| Terrain | `TerrainLodScale` | x0.7 | x0.5 | x1.5 | x2 |
+| Terrain | `TerrainDetailViewDistance`, `TerrainDetailBlendViewDistance` | x1.5 | x2 | x0.7 | x0.5 |
+
+*Near* and *Very near* (`DrawDistance=-1`, `-2`) are for devices on which the game's own work per
+picture is the limit, such as ARM handhelds that run it through an emulator: models and plants give
+way to simpler ones or disappear sooner, and the sun's shadows, which are drawn by rendering the
+scene again for each cascade, end closer. That goes below what the game offers: its own *low* level
+has level-of-detail scales of 1.0. **These two have not been started in the game.** They use the
+mechanism measured below, so the values will arrive; what is not known is whether the engine honours
+scales above 1.0 for models (the terrain's own *low* level uses 1.7, so there it does), how much frame
+rate they gain, and how the result looks.
 
 For the level-of-detail scales smaller means further: the game's own *ultra* level has 0.5 where *high*
 has 1.0. Every quality level is scaled, so the preset works on top of whatever quality is selected in

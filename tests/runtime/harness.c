@@ -1369,8 +1369,13 @@ static unsigned temporary_copies(void)
 
 /* applied: 1 = a preset is selected and the archives hold a render
  * configuration; 0 = the game must get exactly its file. */
+/* applied: 0 = no preset, 1 = "Far", 2 = "Very near". */
 static void scenario_draw_distance(int applied)
 {
+    const char *lod = applied == 2 ? "id=\"ultrahigh\" LodScale=\"1\" KillLodScale=\"1\" ClustersLodScale=\"1\""
+                                   : "id=\"ultrahigh\" LodScale=\"0.35\" KillLodScale=\"0.35\" ClustersLodScale=\"0.5\"";
+    const char *shadow = applied == 2 ? "SunShadowRange0=\"1.5\" SunShadowRange1=\"6\" SunShadowRange2=\"30\""
+                                      : "SunShadowRange0=\"4.5\" SunShadowRange1=\"18\" SunShadowRange2=\"90\"";
     static char disk[8192], wide[16384], narrow[16384], other[8192];
     static const char rewritten[] = "<GamerProfile>\r\n\t<RenderProfile ResolutionX=\"1280\" />\r\n</GamerProfile>\r\n";
     long disk_len = disk_read(L"GamerProfile.xml", disk, sizeof(disk));
@@ -1388,10 +1393,8 @@ static void scenario_draw_distance(int applied)
         CHECK(n > disk_len, "the profile the game read has nothing added (%ld bytes, on disk %ld)", n, disk_len);
         CHECK(contains(wide, n, "<Geometry>") && contains(wide, n, "<Shadow>") && contains(wide, n, "<Terrain>"),
               "the profile the game read lacks the preset's sections");
-        CHECK(contains(wide, n, "id=\"ultrahigh\" LodScale=\"0.35\" KillLodScale=\"0.35\""),
-              "the level-of-detail scales were not multiplied by 0.7");
-        CHECK(contains(wide, n, "SunShadowRange0=\"4.5\" SunShadowRange1=\"18\" SunShadowRange2=\"90\""),
-              "the shadow ranges were not multiplied by 1.5");
+        CHECK(contains(wide, n, lod), "the level-of-detail scales are not the preset's");
+        CHECK(contains(wide, n, shadow), "the shadow ranges are not the preset's");
         CHECK(contains(wide, n, "</Terrain>\r\n</RenderProfile>\r\n\t<NetworkProfile />\r\n</GamerProfile>\r\n"),
               "the sections are not at the end of the render profile");
         CHECK(contains(wide, n, "<CustomQuality>") && memcmp(wide, disk, 120) == 0,
@@ -1608,6 +1611,8 @@ int main(int argc, char **argv)
         scenario_input_held();
     } else if (strcmp(scenario, "drawdistance") == 0) {
         scenario_draw_distance(1);
+    } else if (strcmp(scenario, "drawdistance-near") == 0) {
+        scenario_draw_distance(2);
     } else if (strcmp(scenario, "drawdistance-off") == 0) {
         scenario_draw_distance(0);
     } else if (strcmp(scenario, "shared-tops") == 0) {

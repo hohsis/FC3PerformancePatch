@@ -479,7 +479,7 @@ static void fc3pp_init(HINSTANCE self)
 
     g_active = 1;
     if (g_cfg.draw_distance_invalid) {
-        LOGE("config: the [Graphics] DrawDistance= value is not 0, 1 or 2; the original distances are used");
+        LOGE("config: the [Graphics] DrawDistance= value is not a number from -2 to 2; the original distances are used");
     }
     if (g_cfg.menu_key_invalid) {
         LOGE("config: the [Menu] Key= value is not a key name this patch knows (F1 to F12, Home, End, Insert, "

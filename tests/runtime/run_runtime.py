@@ -143,6 +143,11 @@ SCENARIOS = {
                       "graphics: the profile was handed to the game with the draw-distance preset 3 times"],
                      ["ERROR", "was not applied", "adds nothing", "cannot be applied"]),
     "drawdistance-off": (HARNESS, ini(), ["drawdistance-off"], True, ["initialised"], ["graphics:", "ERROR"]),
+    # The presets for slow devices go the same way; the content is checked by the unit tests.
+    "drawdistance-near": (HARNESS, ini(distance=-2), ["drawdistance-near"], True,
+                          ["graphics: draw distance 'Very near' selected",
+                           "graphics: draw distance 'Very near': 3 sections with shorter distances added"],
+                          ["ERROR", "was not applied", "adds nothing", "cannot be applied"]),
     # A preset is selected but the game's archives cannot be read: the game gets its own file.
     "drawdistance-nodata": (HARNESS, ini(distance=2), ["drawdistance-off"], True,
                             ["graphics: draw distance 'Very far' selected",
@@ -451,6 +456,7 @@ WITH_DATA = {"textures": setup_texture_archives, "textures-noscan": setup_textur
              "shared-tops": setup_shared_archives, "shared-tops-dx9": setup_shared_archives,
              "shared-tops-off": setup_shared_archives,
              "drawdistance": setup_profile, "drawdistance-off": setup_profile,
+             "drawdistance-near": setup_profile,
              "drawdistance-nodata": setup_profile_only, "fastcores": setup_host_cpus}
 
 
@@ -478,7 +484,7 @@ def run_scenario(args, name, env):
                 raise Failure("log unexpectedly contains %r\n--- log ---\n%s" % (s, log))
         check_log_privacy(log, args.work_dir)
     leftovers = [f for f in os.listdir(d) if f.endswith(".bak") or f.endswith(".fc3pp-new")]
-    if leftovers and name not in ("noini", "drawdistance"):
+    if leftovers and name not in ("noini", "drawdistance", "drawdistance-near"):
         raise Failure("unexpected files created: %s" % leftovers)
     return out
 
